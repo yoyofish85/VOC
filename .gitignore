@@ -1,0 +1,43 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.eggs/
+
+# Node / 前端构建
+**/node_modules/
+src/frontend/dist/
+
+# 运行数据（按需提交 data/annual 归档策略由团队决定）
+data/temp/
+*.DS_Store
+
+# 日志与测试产物
+reports/junit.xml
+*.log
+qwen_inference_cache.json
+
+# 本地数据库（如需提交模板可改为示例名）
+*.db
+
+# IDE 和工具
+.cursor/
+.codegraph/
+
+# 测试覆盖率与临时结果
+.coverage
+output/
+reports/
+
+# 数据输出（CSV 结果文件）
+*.csv
+!requirements*.txt
+
+# 部署相关（如果是生成物）
+code_deploy/dist/
+code_deploy/*.zip
+
+# 项目文档（如果是临时导出）
+# Project Documentation/

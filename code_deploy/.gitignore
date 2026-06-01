@@ -1,0 +1,4 @@
+update.zip
+backup/*
+!backup/.gitkeep
+voc_launcher_*.log
