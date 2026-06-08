@@ -53,3 +53,15 @@ def test_health_database_connected(health_client: TestClient) -> None:
     r = health_client.get("/api/health")
     data = r.json().get("data") or {}
     assert data.get("database") == "connected"
+
+
+def test_health_detail_api(health_client: TestClient) -> None:
+    r = health_client.get("/api/health/detail")
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("code") == 200
+    data = body.get("data") or {}
+    assert data.get("status") in ("healthy", "degraded")
+    assert "db" in data
+    assert "stats" in data
+    assert data["stats"].get("total_rows", -1) >= 0

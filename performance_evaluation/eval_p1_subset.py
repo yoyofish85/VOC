@@ -280,6 +280,173 @@ def export_unfixed_primary(enriched_primary: List[Dict[str, Any]], path: Path) -
     return len(unfixed), reason_counter
 
 
+def export_fixable_primary(enriched_primary: List[Dict[str, Any]], path: Path) -> int:
+    """导出 P1 主靶中规则重放可修复、但库内 v3 仍为业务类的样本。"""
+    diagnose = _get_capture_diagnoser()
+    fixable = [
+        r
+        for r in enriched_primary
+        if r["model_l1"] != r["human_l1"] and r["replay_l1"] == r["human_l1"]
+    ]
+    rows: List[Dict[str, str]] = []
+    for r in fixable:
+        diag = diagnose(r["text"])
+        flags = r.get("rule_flags") or {}
+        rows.append(
+            {
+                "舆情编号": r["opinion_id"],
+                "原文": r["text"],
+                "模型一级": r["model_l1"],
+                "模型二级": r["model_l2"],
+                "人工一级": r["human_l1"],
+                "人工二级": r["human_l2"],
+                "重放一级": r["replay_l1"],
+                "重放二级": r["replay_l2"],
+                "捕获诊断": diag,
+                "规则标记": _format_rule_flags(flags),
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=UNFIXED_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(fixable)
+
+
+def export_unfixed_regression(enriched_regression: List[Dict[str, Any]], path: Path) -> Tuple[int, Counter]:
+    """导出 P1 回归中规则重放仍未拉回业务类的样本（M4-B 主战场）。"""
+    diagnose = _get_capture_diagnoser()
+    unfixed = [r for r in enriched_regression if r["replay_l1"] != r["human_l1"]]
+    reason_counter: Counter = Counter()
+    rows: List[Dict[str, str]] = []
+    for r in unfixed:
+        diag = diagnose(r["text"])
+        reason_counter[diag.split(";")[0]] += 1
+        flags = r.get("rule_flags") or {}
+        rows.append(
+            {
+                "舆情编号": r["opinion_id"],
+                "原文": r["text"],
+                "模型一级": r["model_l1"],
+                "模型二级": r["model_l2"],
+                "人工一级": r["human_l1"],
+                "人工二级": r["human_l2"],
+                "重放一级": r["replay_l1"],
+                "重放二级": r["replay_l2"],
+                "捕获诊断": diag,
+                "规则标记": _format_rule_flags(flags),
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=UNFIXED_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(unfixed), reason_counter
+
+
+def export_fixable_regression(enriched_regression: List[Dict[str, Any]], path: Path) -> int:
+    """导出 P1 回归中规则重放可拉回业务类、但库内 v3 仍为非问题的样本（M4-A）。"""
+    fixable = [
+        r
+        for r in enriched_regression
+        if r["model_l1"] != r["human_l1"] and r["replay_l1"] == r["human_l1"]
+    ]
+    rows: List[Dict[str, str]] = []
+    for r in fixable:
+        flags = r.get("rule_flags") or {}
+        rows.append(
+            {
+                "舆情编号": r["opinion_id"],
+                "原文": r["text"],
+                "模型一级": r["model_l1"],
+                "模型二级": r["model_l2"],
+                "人工一级": r["human_l1"],
+                "人工二级": r["human_l2"],
+                "重放一级": r["replay_l1"],
+                "重放二级": r["replay_l2"],
+                "捕获诊断": _format_rule_flags(flags) or "guard_pullback",
+                "规则标记": _format_rule_flags(flags),
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=UNFIXED_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(fixable)
+
+
+def export_other_errors_replay(
+    other_errors: List[Dict[str, Any]], enriched_other: List[Dict[str, Any]], path: Path
+) -> Tuple[int, int]:
+    """导出其他 L1 错误及规则重放结果（M4-B 候选池）。"""
+    by_oid = {r["opinion_id"]: r for r in enriched_other}
+    rows: List[Dict[str, str]] = []
+    fixable = 0
+    for d in other_errors:
+        r = by_oid.get(d["opinion_id"], d)
+        flags = r.get("rule_flags") or {}
+        replay_ok = r.get("replay_l1") == r["human_l1"]
+        if replay_ok and r.get("model_l1") != r["human_l1"]:
+            fixable += 1
+        err_pat = f"{r['model_l1']} → {r['human_l1']}"
+        rows.append(
+            {
+                "舆情编号": r["opinion_id"],
+                "原文": r["text"],
+                "模型一级": r["model_l1"],
+                "模型二级": r["model_l2"],
+                "人工一级": r["human_l1"],
+                "人工二级": r["human_l2"],
+                "重放一级": r.get("replay_l1", r["model_l1"]),
+                "重放二级": r.get("replay_l2", r["model_l2"]),
+                "捕获诊断": err_pat if not replay_ok else f"fixable:{err_pat}",
+                "规则标记": _format_rule_flags(flags),
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=UNFIXED_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(rows), fixable
+
+
+def export_fixable_other(enriched_other: List[Dict[str, Any]], path: Path) -> int:
+    """导出其他 L1 错误中规则重放可纠偏样本（跨类 tilt 等）。"""
+    fixable = [
+        r
+        for r in enriched_other
+        if r["model_l1"] != r["human_l1"] and r["replay_l1"] == r["human_l1"]
+    ]
+    rows: List[Dict[str, str]] = []
+    for r in fixable:
+        flags = r.get("rule_flags") or {}
+        err_pat = f"{r['model_l1']} → {r['human_l1']}"
+        rows.append(
+            {
+                "舆情编号": r["opinion_id"],
+                "原文": r["text"],
+                "模型一级": r["model_l1"],
+                "模型二级": r["model_l2"],
+                "人工一级": r["human_l1"],
+                "人工二级": r["human_l2"],
+                "重放一级": r["replay_l1"],
+                "重放二级": r["replay_l2"],
+                "捕获诊断": f"fixable:{err_pat}",
+                "规则标记": _format_rule_flags(flags),
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=UNFIXED_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(fixable)
+
+
 def estimate_global_l1_delta(all_rows: List[Dict[str, Any]], enriched_primary: List[Dict]) -> float:
     """估算全库 L1 提升百分点（仅 P1 主靶修复数 / 全库 L1 分母）。"""
     l1_den = len(all_rows)
@@ -406,6 +573,46 @@ def main() -> int:
         help="导出 P1 主靶未修复 CSV（含捕获诊断）；省略路径则写 exports/p1_primary_unfixed_时间戳.csv",
     )
     parser.add_argument(
+        "--export-fixable",
+        nargs="?",
+        const="auto",
+        default=None,
+        metavar="PATH",
+        help="导出 P1 主靶可修复 CSV（v3 仍为业务，规则重放→非问题）；省略路径则写 exports/p1_primary_fixable_时间戳.csv",
+    )
+    parser.add_argument(
+        "--export-regression-fixable",
+        nargs="?",
+        const="auto",
+        default=None,
+        metavar="PATH",
+        help="导出 P1 回归可拉回 CSV（v3=非问题，重放→业务）；M4-A",
+    )
+    parser.add_argument(
+        "--export-regression-unfixed",
+        nargs="?",
+        const="auto",
+        default=None,
+        metavar="PATH",
+        help="导出 P1 回归未拉回 CSV（含捕获诊断）；M4-B",
+    )
+    parser.add_argument(
+        "--export-other-errors",
+        nargs="?",
+        const="auto",
+        default=None,
+        metavar="PATH",
+        help="导出其他 L1 错误 + 重放结果；M4-B 候选池",
+    )
+    parser.add_argument(
+        "--export-other-fixable",
+        nargs="?",
+        const="auto",
+        default=None,
+        metavar="PATH",
+        help="导出其他 L1 可纠偏 CSV（跨类 tilt）；M4-B2",
+    )
+    parser.add_argument(
         "--shadow-llm",
         type=int,
         default=0,
@@ -418,6 +625,11 @@ def main() -> int:
         and not args.compare
         and not args.export_ids
         and args.export_unfixed is None
+        and args.export_fixable is None
+        and args.export_regression_fixable is None
+        and args.export_regression_unfixed is None
+        and args.export_other_errors is None
+        and args.export_other_fixable is None
         and not args.shadow_llm
     ):
         args.compare = True
@@ -431,6 +643,7 @@ def main() -> int:
     primary, regression, other = classify_subset(all_rows)
     enriched_p = replay_rules(primary)
     enriched_r = replay_rules(regression)
+    enriched_o = replay_rules(other)
 
     for r in enriched_p:
         r["model_l1_key"] = r["model_l1"]
@@ -496,12 +709,86 @@ def main() -> int:
             )
         else:
             unfixed_path = Path(args.export_unfixed)
+            if not unfixed_path.is_absolute():
+                # 相对路径统一写入 performance_evaluation/exports/（避免落到项目根 exports/）
+                unfixed_path = EXPORTS_DIR / unfixed_path.name
         n_unfixed, reasons = export_unfixed_primary(enriched_p, unfixed_path)
         print(f"[已导出] P1 主靶未修复 {n_unfixed} 条 → {unfixed_path}")
         if reasons:
             print("[捕获诊断分布]")
             for reason, cnt in reasons.most_common():
                 print(f"  {reason}: {cnt}")
+
+    if args.export_fixable is not None:
+        if args.export_fixable == "auto":
+            fixable_path = (
+                EXPORTS_DIR
+                / f"p1_primary_fixable_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+            )
+        else:
+            fixable_path = Path(args.export_fixable)
+            if not fixable_path.is_absolute():
+                fixable_path = EXPORTS_DIR / fixable_path.name
+        n_fixable = export_fixable_primary(enriched_p, fixable_path)
+        print(f"[已导出] P1 主靶可修复 {n_fixable} 条 → {fixable_path}")
+
+    if args.export_regression_fixable is not None:
+        if args.export_regression_fixable == "auto":
+            reg_path = (
+                EXPORTS_DIR
+                / f"p1_regression_fixable_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+            )
+        else:
+            reg_path = Path(args.export_regression_fixable)
+            if not reg_path.is_absolute():
+                reg_path = EXPORTS_DIR / reg_path.name
+        n_reg = export_fixable_regression(enriched_r, reg_path)
+        print(f"[已导出] P1 回归可拉回 {n_reg} 条 → {reg_path}")
+
+    if args.export_regression_unfixed is not None:
+        if args.export_regression_unfixed == "auto":
+            reg_unfixed_path = (
+                EXPORTS_DIR
+                / f"p1_regression_unfixed_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+            )
+        else:
+            reg_unfixed_path = Path(args.export_regression_unfixed)
+            if not reg_unfixed_path.is_absolute():
+                reg_unfixed_path = EXPORTS_DIR / reg_unfixed_path.name
+        n_reg_unfixed, reg_reasons = export_unfixed_regression(enriched_r, reg_unfixed_path)
+        print(f"[已导出] P1 回归未拉回 {n_reg_unfixed} 条 → {reg_unfixed_path}")
+        if reg_reasons:
+            print("[回归未拉回·捕获诊断分布]")
+            for reason, cnt in reg_reasons.most_common():
+                print(f"  {reason}: {cnt}")
+
+    if args.export_other_errors is not None:
+        if args.export_other_errors == "auto":
+            other_path = (
+                EXPORTS_DIR
+                / f"p1_other_l1_errors_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+            )
+        else:
+            other_path = Path(args.export_other_errors)
+            if not other_path.is_absolute():
+                other_path = EXPORTS_DIR / other_path.name
+        n_other, n_other_fix = export_other_errors_replay(other, enriched_o, other_path)
+        print(
+            f"[已导出] 其他 L1 错误 {n_other} 条（重放可修 {n_other_fix}）→ {other_path}"
+        )
+
+    if args.export_other_fixable is not None:
+        if args.export_other_fixable == "auto":
+            other_fix_path = (
+                EXPORTS_DIR
+                / f"p1_other_fixable_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+            )
+        else:
+            other_fix_path = Path(args.export_other_fixable)
+            if not other_fix_path.is_absolute():
+                other_fix_path = EXPORTS_DIR / other_fix_path.name
+        n_other_fixable = export_fixable_other(enriched_o, other_fix_path)
+        print(f"[已导出] 其他 L1 可纠偏 {n_other_fixable} 条 → {other_fix_path}")
 
     text = format_report(stats, compare=args.compare or args.save_baseline, shadow=shadow_rows)
     print(text)

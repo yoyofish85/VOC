@@ -1,0 +1,27 @@
+{
+  "label": "evolution_mvp_week0",
+  "locked_at": "2026-06-04T16:10:49",
+  "source": "evaluate_accuracy after M4-B r4 patch",
+  "delivery_report": "performance_evaluation/state/m4b_r4_delivery_20260604.json",
+  "l1_accuracy": 0.8698,
+  "l1_correct": 2004,
+  "l1_wrong": 300,
+  "l1_denominator": 2304,
+  "l2_accuracy": 0.769,
+  "l2_correct": 516,
+  "l2_wrong": 155,
+  "l2_denominator": 671,
+  "cumulative_reviewed": 2362,
+  "rule_version": "v12_m4b_r4",
+  "analyze_m4b_fixable": {
+    "regression": 0,
+    "other_l1": 0,
+    "primary": 0
+  },
+  "mvp_month1_target_l1_pct": 88.0,
+  "finetune_trigger": {
+    "new_reviewed_since_baseline": 3000,
+    "l1_mismatch_since_baseline": 800,
+    "consecutive_weeks_fixable_lt5": 2
+  }
+}

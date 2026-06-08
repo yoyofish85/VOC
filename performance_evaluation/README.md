@@ -117,4 +117,31 @@ performance_evaluation/
 
 ---
 
+---
+
+## 八、进化闭环周报告（MVP P0）
+
+在项目根执行（只读 DB）：
+
+```bash
+python3 performance_evaluation/weekly_evolution_report.py
+python3 performance_evaluation/weekly_evolution_report.py --days 7 --db path/to/opinion_review.db
+```
+
+- 报告：`performance_evaluation/reports/YYYYMMDD_HHMM_weekly_evolution.txt`
+- 上周快照：`performance_evaluation/state/evolution_weekly_last.json`
+- Week0 基线：`performance_evaluation/state/evolution_baseline.json`
+
+建议每周五流程：
+
+```bash
+python3 performance_evaluation/evaluate_accuracy.py
+python3 performance_evaluation/export_l1_errors.py --since 7d
+python3 performance_evaluation/eval_p1_subset.py --compare \
+  --export-regression-fixable auto --export-other-fixable auto
+python3 performance_evaluation/weekly_evolution_report.py
+```
+
+---
+
 **版本**：随 VOC_V1.5 仓库维护。

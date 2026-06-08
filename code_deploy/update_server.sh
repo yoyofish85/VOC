@@ -74,6 +74,17 @@ echo "[4/6] 正在合并覆盖 src/（不删除 data/、不覆盖项目根下配
 # 仅将包内 src 同步到项目 src：不删除目标中多余文件，降低误删风险
 rsync -a "$TMP/src/" "$VOC_ROOT/src/"
 rm -rf "$TMP"
+
+# 清理 SQLite WAL 残留（不应存在于部署包；若存在说明前次部署带入，可能损坏数据库）
+WAL_REMOVED=0
+while IFS= read -r -d '' f; do
+  rm -f "$f"
+  WAL_REMOVED=$((WAL_REMOVED + 1))
+done < <(find "$VOC_ROOT/src" \( -name '*.db-shm' -o -name '*.db-wal' \) -print0 2>/dev/null)
+if [[ "$WAL_REMOVED" -gt 0 ]]; then
+  echo "  → 已清理 $WAL_REMOVED 个 SQLite WAL 残留文件 (*.db-shm / *.db-wal)"
+fi
+
 echo "  [✓] src/ 已更新"
 echo ""
 

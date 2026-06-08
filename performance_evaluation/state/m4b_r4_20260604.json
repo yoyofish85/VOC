@@ -1,0 +1,17 @@
+{
+  "milestone": "M4-B4",
+  "status": "delivered",
+  "delivered_at": "2026-06-04",
+  "baseline_l1_pct": 86.37,
+  "result_l1_pct": 86.98,
+  "baseline_l1_correct": 1990,
+  "result_l1_correct": 2004,
+  "rule_version": "v12_m4b_r4",
+  "cache_key": "classify_v12_m4b_r4",
+  "tracks": [
+    "regression_neutral_query_pullback",
+    "other_l1_category_rebalance"
+  ],
+  "patch_total_l1": 14,
+  "delivery_report": "performance_evaluation/state/m4b_r4_delivery_20260604.json"
+}

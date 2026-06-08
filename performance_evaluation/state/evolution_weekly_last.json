@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-06-04T17:42:20",
+  "l1_accuracy": 0.0,
+  "l2_accuracy": 0.0,
+  "l1_correct": 0,
+  "l1_denominator": 0,
+  "cumulative_reviewed": 34,
+  "fixable_total": 0,
+  "consecutive_weeks_fixable_lt5": 2,
+  "pool_regression": 0,
+  "pool_other": 0,
+  "period_new_reviewed": 0
+}

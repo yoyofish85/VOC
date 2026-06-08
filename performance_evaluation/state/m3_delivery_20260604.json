@@ -1,0 +1,53 @@
+{
+  "milestone": "M3",
+  "delivered_at": "2026-06-04T11:12:22",
+  "status": "closed",
+  "rule_version": "v11_m3_r2",
+  "cache_key": "classify_v11_m3_r2",
+  "code_changes": [
+    "src/backend/qwen_ollama.py: _v11_business_guard_exempt, _v11_m3_eligible",
+    "src/backend/qwen_ollama.py: _KZ_SYMPTOM_INQUIRY 收窄（去掉裸「需要更换」）",
+    "src/backend/qwen_ollama.py: 事故 relay 豁免 hard_negative（已报警）与 V98 单方事故 block",
+    "tests/unit/test_v11_m3.py"
+  ],
+  "kpi": {
+    "l1_before": { "correct": 1903, "total": 2304, "pct": 82.6 },
+    "l1_after": { "correct": 1917, "total": 2304, "pct": 83.2 },
+    "l1_delta_pp": 0.61,
+    "l2_pct": 75.0,
+    "l2_delta_pp": 0.0
+  },
+  "p1_primary": {
+    "pool": 71,
+    "offline_fixed": 14,
+    "patched": 14,
+    "remaining": 57,
+    "remaining_diag": {
+      "blocked:hard_negative": 43,
+      "no_capture_pattern": 6,
+      "blocked:negation": 3,
+      "blocked:lfc_charging_complaint": 2,
+      "blocked:business_issue_guard": 2,
+      "blocked:srv_quality_issue": 1
+    },
+    "intentionally_not_captured": 8
+  },
+  "p1_regression": {
+    "pool": 238,
+    "offline_fixable": 21,
+    "broken": 0,
+    "note": "M4-A 待 patch"
+  },
+  "patch_reports": [
+    "performance_evaluation/state/patch_p1_fixable_20260604_111152.json"
+  ],
+  "export_csv": "performance_evaluation/exports/p1_primary_fixable_20260604_1110.csv",
+  "gates": {
+    "primary_broken": 0,
+    "regression_broken": 0,
+    "primary_fixed_min": 12,
+    "primary_fixed_actual": 14,
+    "passed": true
+  },
+  "next_milestone": "M4"
+}

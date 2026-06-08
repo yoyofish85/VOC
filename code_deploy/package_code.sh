@@ -54,6 +54,7 @@ rsync -a \
   --exclude '.vite/' \
   --exclude 'dist/' \
   --exclude '*.db' \
+  --exclude '*.db-*' \
   --exclude '*.sqlite' \
   --exclude '*.sqlite3' \
   --exclude 'qwen_inference_cache.json' \

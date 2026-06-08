@@ -614,6 +614,26 @@ const pendingAutoSaveRows = new Map()
 /** 一级→二级选项内存缓存，避免每次选 L1 都请求后端全表聚合 */
 const l2OptionsCache = new Map()
 
+// 全量后备二级列表（当金标/体系/API 全部不可用时使用）
+const _FALLBACK_L2_LIST = [
+  '车端充电问题', 'LFC问题', '家充问题', '公共充电问题', '闪充问题',
+  '故障-通用', '故障告警', '车机问题', '座舱问题', 'OTA问题',
+  '智能驾驶', 'AD4问题', '泊车问题', '安全性故障',
+  '销售服务问题', '交付问题', '售后服务问题', '客服问题', '门店服务问题',
+  '功能建议', '体验优化', '性能提升', 'UI/UX建议', '配置诉求',
+  '咨询与表扬', '其他非问题', '无标签'
+]
+const _FALLBACK_L2_BY_L1 = {
+  产品质量类: ['车端充电问题', 'LFC问题', '家充问题', '公共充电问题', '闪充问题', '故障-通用', '故障告警', '车机问题', '座舱问题', 'OTA问题', '智能驾驶', 'AD4问题', '泊车问题', '安全性故障'],
+  服务类: ['销售服务问题', '交付问题', '售后服务问题', '客服问题', '门店服务问题'],
+  体验需求类: ['功能建议', '体验优化', '性能提升', 'UI/UX建议', '配置诉求'],
+  非问题: ['咨询与表扬', '其他非问题']
+}
+const fallbackL2ForL1 = (l1) => {
+  const key = (l1 || '').trim()
+  return _FALLBACK_L2_BY_L1[key] || _FALLBACK_L2_LIST
+}
+
 const isNonIssueL1 = (l1) => (l1 || '').trim() === '非问题'
 const isL2RequiredForL1 = (l1) => !isNonIssueL1(l1)
 const rowEffectiveL1 = (row) => (row?.review_l1 || '').trim() || (row?.canonical_l1 || '').trim()
@@ -1033,6 +1053,9 @@ const hydratePageL2Options = async () => {
       const map = res.data.by_l1
       for (const [l1, rows] of byL1) {
         const base = map[l1] || map[normalizeWorkbenchL1(l1)] || []
+        if (base.length > 0) {
+          l2OptionsCache.set(l1, base)
+        }
         for (const row of rows) {
           row._l2opts = mergeL2OptionsList(base, row)
         }
@@ -1302,7 +1325,11 @@ const modelKeywordL2 = (row) => {
 }
 /** 金标/体系合并后再并入当前人工值与模型识别值，避免漏项 */
 const mergeL2OptionsList = (baseList, row) => {
-  const b = Array.isArray(baseList) ? [...baseList] : []
+  let b = Array.isArray(baseList) ? [...baseList] : []
+  if (!b.length) {
+    const l1 = (row?.canonical_l1 || '').trim() || effectiveL1ForRow(row)
+    b = [...fallbackL2ForL1(l1)]
+  }
   const cur = (row?.review_l2 || '').trim()
   const v3 = cleanV3L2(row)
   const mk = modelKeywordL2(row)
@@ -1313,6 +1340,9 @@ const onL2SelectVisible = (row, open) => {
   if (!open) {
     row._l2FilterQ = ''
   } else {
+    if (!row._l2opts?.length) {
+      row._l2opts = mergeL2OptionsList([], row)
+    }
     loadRowL2Options(row)
   }
 }
@@ -1448,17 +1478,19 @@ const batchConfirmReview = async () => {
 const onTableReviewL1Change = (row) => {
   row.review_l2 = ''
   row._l2FilterQ = ''
-  row._l2opts = []
   const l1 = (row.review_l1 || '').trim()
   if (!l1) {
+    row._l2opts = []
     scheduleRowAutoSave(row)
     return
   }
   row.canonical_l1 = l1
   if (isNonIssueL1(l1)) {
+    row._l2opts = []
     scheduleRowAutoSave(row)
     return
   }
+  row._l2opts = mergeL2OptionsList([], row)
   loadRowL2Options(row)
   scheduleRowAutoSave(row)
 }
@@ -1469,15 +1501,16 @@ const loadRowL2Options = async (row) => {
     row._l2opts = []
     return
   }
-  const cached = l2OptionsCache.get(l1)
-  if (cached) {
-    row._l2opts = mergeL2OptionsList(cached, row)
+  if (l2OptionsCache.has(l1)) {
+    row._l2opts = mergeL2OptionsList(l2OptionsCache.get(l1), row)
     return
   }
   try {
     const res = await getL2ByL1Api({ l1 })
     const base = res.code === 200 && Array.isArray(res.data?.l2_whitelist) ? res.data.l2_whitelist : []
-    l2OptionsCache.set(l1, base)
+    if (base.length > 0) {
+      l2OptionsCache.set(l1, base)
+    }
     row._l2opts = mergeL2OptionsList(base, row)
   } catch (_) {
     row._l2opts = mergeL2OptionsList([], row)
@@ -1491,16 +1524,17 @@ const reloadDrawerL2List = async () => {
     drawerL2List.value = []
     return
   }
-  const cached = l2OptionsCache.get(l1)
-  if (cached) {
+  if (l2OptionsCache.has(l1)) {
     const syn = { ...drawerRow.value, review_l1: l1, review_l2: drawerL2.value }
-    drawerL2List.value = mergeL2OptionsList(cached, syn)
+    drawerL2List.value = mergeL2OptionsList(l2OptionsCache.get(l1), syn)
     return
   }
   try {
     const res = await getL2ByL1Api({ l1 })
     const base = res.code === 200 && Array.isArray(res.data?.l2_whitelist) ? res.data.l2_whitelist : []
-    l2OptionsCache.set(l1, base)
+    if (base.length > 0) {
+      l2OptionsCache.set(l1, base)
+    }
     const syn = { ...drawerRow.value, review_l1: l1, review_l2: drawerL2.value }
     drawerL2List.value = mergeL2OptionsList(base, syn)
   } catch (_) {
@@ -1532,8 +1566,13 @@ const saveDraftReviews = async () => {
       reviews,
       reviewer: reviewerName.value || undefined
     })
-    if (res.code === 200) {
+    if res.code === 200) {
       ElMessage.success(res.msg || '已暂存')
+      if (!res.reflow_async && Number(res.reflowed || 0) === 0) {
+        ElMessage.info(
+          '数据尚未进入清洗库回流队列；如需确保进入年度归档，请执行「批量确认复核」并勾选归档年度数据。'
+        )
+      }
       await getReviewList()
       getYearlySummary()
       emit('refresh')

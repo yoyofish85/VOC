@@ -1,0 +1,101 @@
+{
+  "milestone": "M4-B4",
+  "status": "delivered",
+  "delivered_at": "2026-06-04T16:10:49",
+  "server_path": "/Users/chaoyu/Desktop/VOC_AI agent/VOC_V1.5",
+  "rule_version": "v12_m4b_r4",
+  "cache_key": "classify_v12_m4b_r4",
+  "kpi": {
+    "before": {
+      "l1_pct": 86.37,
+      "l1_correct": 1990,
+      "l1_denominator": 2304,
+      "l2_pct": 77.63,
+      "l2_correct": 510,
+      "l2_denominator": 657,
+      "eval_at": "2026-06-04T14:59:02"
+    },
+    "after": {
+      "l1_pct": 86.98,
+      "l1_correct": 2004,
+      "l1_wrong": 300,
+      "l1_denominator": 2304,
+      "l2_pct": 76.9,
+      "l2_correct": 516,
+      "l2_wrong": 155,
+      "l2_denominator": 671,
+      "eval_at": "2026-06-04T16:10:49"
+    },
+    "delta_l1_pp": 0.61,
+    "delta_l2_pp": -0.73
+  },
+  "patches": {
+    "regression": {
+      "csv": "performance_evaluation/exports/p1_regression_fixable_20260604_1551.csv",
+      "updated": 1,
+      "report": "performance_evaluation/state/patch_p1_regression_20260604_160948.json",
+      "sample_ids": ["10-201-108-291083"]
+    },
+    "other_l1": {
+      "csv": "performance_evaluation/exports/p1_other_fixable_20260604_1551.csv",
+      "updated": 13,
+      "report": "performance_evaluation/state/patch_p1_other_l1_20260604_161009.json"
+    },
+    "l2_replay": {
+      "updated": 0,
+      "report": "performance_evaluation/state/patch_v3_l2_replay_20260604_165720.json",
+      "note": "L1 已对齐样本无额外 L2 可写"
+    },
+    "total_l1_fixed": 14
+  },
+  "gates": {
+    "primary_broken_max": 2,
+    "primary_broken_actual": 0,
+    "regression_broken_max": 8,
+    "regression_broken_actual": 0,
+    "passed": true
+  },
+  "error_pools_after": {
+    "p1_regression": 164,
+    "p1_primary": 57,
+    "other_l1": 79,
+    "total_l1_wrong": 300
+  },
+  "regression_unfixed_top_diagnosis": {
+    "eligible:neutral_query": 36,
+    "eligible:praise": 21,
+    "eligible:soft_hope_suggest": 16,
+    "no_capture_pattern": 15,
+    "eligible:neutral_statement": 14,
+    "blocked:v12_regression_pullback": 14,
+    "eligible:lfc_consult": 10,
+    "eligible:wish_feedback": 9
+  },
+  "analyze_m4b_after_r4": {
+    "regression_fixable": 0,
+    "other_fixable": 0,
+    "primary_fixable": 0,
+    "conclusion": "规则轨 ROI 见底；离线重放无可写 patch"
+  },
+  "l1_error_top3": [
+    "非问题 → 服务类 (65)",
+    "非问题 → 产品质量类 (54)",
+    "非问题 → 体验需求类 (45)"
+  ],
+  "l2_error_top3": [
+    "车端充电问题 → LFC问题 (12)",
+    "故障-通用 → 故障告警 (12)",
+    "智能驾驶 → AD4问题 (11)"
+  ],
+  "cumulative_l1_patches_since_m3": 101,
+  "gap_to_targets": {
+    "l1_90pct_need": 70,
+    "l1_95pct_need": 185,
+    "l2_90pct_need": 88
+  },
+  "next_priority": [
+    "evolution_loop_mvp Week 0（weekly_evolution_report.py）",
+    "14B 微调样本池（规则轨 fixable=0）",
+    "可选：praise/neutral_query 边界专项（ROI 低，慎攻）"
+  ]
+}

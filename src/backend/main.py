@@ -72,6 +72,12 @@ KEYWORD_FILE = os.path.abspath(
     os.environ.get("VOC_KEYWORD_FILE", os.path.join(BACKEND_DIR, "keywords_v1.2.json"))
 )
 CLASSIFICATION_LOG_FILE = os.path.join(BACKEND_DIR, "classification_accuracy.log")
+REFLOW_FAILURES_PATH = Path(BACKEND_DIR) / "reflow_failures.jsonl"
+PENDING_REFLOW_PATH = Path(BACKEND_DIR) / "pending_reflow.jsonl"
+PENDING_REFLOW_INTERVAL = int(os.environ.get("VOC_PENDING_REFLOW_INTERVAL", "60"))
+_pending_reflow_lock = threading.Lock()
+_pending_reflow_daemon_started = False
+_pending_reflow_daemon_lock = threading.Lock()
 RATE_LIMIT_CONFIG = {
     "upload_csv": {"rate": 40, "interval": 60},
     "save_review": {"rate": 100, "interval": 60},
@@ -519,9 +525,27 @@ def init_db():
     print("数据库初始化完成，索引已创建")
 
 
+def _ensure_db_wal_mode():
+    """启动时设置 WAL 模式，提升并发读写性能。"""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=60)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
+        conn.execute("PRAGMA busy_timeout=60000")  # 60s busy timeout
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.execute("PRAGMA mmap_size=268435456")  # 256MB mmap
+        conn.close()
+        logger.info("SQLite WAL 模式已启用 (db=%s)", DB_PATH)
+    except Exception as e:
+        logger.warning("启用 SQLite WAL 模式失败 (非阻塞): %s", e)
+
+
 def query_db(sql, params=[], fetch_all=True):
     """查询数据库。注意：SQLite 对 SELECT 的 rowcount 为 -1，fetch_all=False 时必须用 fetchone()。"""
     conn = sqlite3.connect(DB_PATH, timeout=SQLITE_CONN_TIMEOUT)
+    conn.execute("PRAGMA busy_timeout=60000")
+    conn.execute("PRAGMA query_only=ON")
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     try:
@@ -583,6 +607,8 @@ def query_db_with_voc_json(sql: str, params: Optional[List[Any]] = None, fetch_a
     if params is None:
         params = []
     conn = sqlite3.connect(DB_PATH, timeout=SQLITE_CONN_TIMEOUT)
+    conn.execute("PRAGMA busy_timeout=60000")
+    conn.execute("PRAGMA query_only=ON")
     conn.row_factory = sqlite3.Row
     conn.create_function("voc_json_extract", 2, _voc_sql_json_extract)
     c = conn.cursor()
@@ -600,6 +626,7 @@ def query_db_with_voc_json(sql: str, params: Optional[List[Any]] = None, fetch_a
 
 def execute_db(sql, params=[], return_last_id=False):
     conn = sqlite3.connect(DB_PATH, timeout=SQLITE_CONN_TIMEOUT)
+    conn.execute("PRAGMA busy_timeout=60000")
     c = conn.cursor()
     if isinstance(params, list) and len(params) > 0 and isinstance(params[0], list):
         c.executemany(sql, params)
@@ -616,6 +643,7 @@ def execute_db_many(sql: str, rows: List[List[Any]]) -> int:
     if not rows:
         return 0
     conn = sqlite3.connect(DB_PATH, timeout=SQLITE_CONN_TIMEOUT)
+    conn.execute("PRAGMA busy_timeout=60000")
     try:
         conn.executemany(sql, rows)
         conn.commit()
@@ -722,6 +750,54 @@ def _count_classify_targets(upload_batch: Optional[str], opinion_ids: Optional[L
     return 0
 
 
+def _append_reflow_failure_jsonl(opinion_id: str, reason: str) -> None:
+    entry = {
+        "opinion_id": opinion_id,
+        "reason": reason,
+        "ts": datetime.now().isoformat(timespec="seconds"),
+    }
+    REFLOW_FAILURES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(REFLOW_FAILURES_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _mark_reflow_row_failed(opinion_id: str, reason: str) -> None:
+    """回流失败：写 jsonl 审计，并将 opinion.reflow_synced 标为 -1。"""
+    clipped = (reason or "unknown")[:500]
+    _append_reflow_failure_jsonl(opinion_id, clipped)
+    try:
+        execute_db(
+            "UPDATE opinion SET reflow_synced = -1, reflow_sync_reason = ? WHERE opinion_id = ?",
+            [clipped, opinion_id],
+        )
+    except Exception:
+        logger.exception("mark reflow failed db update oid=%s", opinion_id)
+
+
+def _read_reflow_failures(limit: int = 50) -> List[dict]:
+    if not REFLOW_FAILURES_PATH.is_file():
+        return []
+    lines: List[str] = []
+    try:
+        with open(REFLOW_FAILURES_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        logger.exception("read reflow_failures.jsonl failed")
+        return []
+    out: List[dict] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _refresh_label_matcher_gold_cache() -> None:
     """复核确认后异步刷新规则路径的金标缓存，不阻塞主线程；失败仅记日志。"""
     def runner():
@@ -769,10 +845,203 @@ def _reflow_rows_background(
                             _apply_yearly_archive_for_batch(ub, reviewer)
                         except Exception:
                             logger.exception("background yearly archive failed batch=%s", ub)
-        except Exception:
+        except Exception as e:
+            reason = str(e)[:500] or type(e).__name__
             logger.exception("background reflow failed trigger=%s rows=%s", trigger, len(rows))
+            for row in rows:
+                oid = (row.get("opinion_id") or "").strip()
+                if oid:
+                    _mark_reflow_row_failed(oid, reason)
 
     threading.Thread(target=runner, daemon=True).start()
+
+
+def _read_pending_reflow_entries() -> List[dict]:
+    if not PENDING_REFLOW_PATH.is_file():
+        return []
+    try:
+        with open(PENDING_REFLOW_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        logger.exception("read pending_reflow.jsonl failed")
+        return []
+    out: List[dict] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def _write_pending_reflow_entries(entries: List[dict]) -> None:
+    PENDING_REFLOW_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PENDING_REFLOW_PATH.with_suffix(".jsonl.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        for entry in entries:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    tmp.replace(PENDING_REFLOW_PATH)
+
+
+def _enqueue_pending_reflow(opinion_id: str, upload_batch: str, source: str) -> None:
+    oid = (opinion_id or "").strip()
+    if not oid:
+        return
+    entry = {
+        "opinion_id": oid,
+        "upload_batch": (upload_batch or "").strip(),
+        "source": source,
+        "ts": datetime.now().isoformat(timespec="seconds"),
+    }
+    PENDING_REFLOW_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _pending_reflow_lock:
+        with open(PENDING_REFLOW_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    logger.info("pending reflow queued oid=%s batch=%s source=%s", oid, upload_batch, source)
+
+
+def _maybe_enqueue_pending_reflow(
+    opinion_id: str,
+    review_l1: Any,
+    source: str = "save_review",
+) -> bool:
+    """已复核且尚未回流时写入延迟回流队列（不阻塞请求）。"""
+    row = query_db(
+        "SELECT review_status, reflow_synced, review_l1, upload_batch FROM opinion WHERE opinion_id = ?",
+        [opinion_id],
+        fetch_all=False,
+    )
+    if not row or int(row.get("review_status") or 0) != 1:
+        return False
+    if int(row.get("reflow_synced") or 0) >= 1:
+        return False
+    l1 = (str(review_l1).strip() if review_l1 is not None else "") or str(row.get("review_l1") or "").strip()
+    if not l1:
+        return False
+    _enqueue_pending_reflow(opinion_id, str(row.get("upload_batch") or ""), source)
+    return True
+
+
+def _flush_pending_reflow_once() -> None:
+    with _pending_reflow_lock:
+        entries = _read_pending_reflow_entries()
+    if not entries:
+        return
+
+    by_oid: Dict[str, dict] = {}
+    for entry in entries:
+        oid = str(entry.get("opinion_id") or "").strip()
+        if oid:
+            by_oid[oid] = entry
+
+    processed_oids: set = set()
+    by_batch: Dict[str, List[str]] = defaultdict(list)
+    no_batch: List[str] = []
+    for oid, entry in by_oid.items():
+        ub = str(entry.get("upload_batch") or "").strip()
+        if ub:
+            by_batch[ub].append(oid)
+        else:
+            no_batch.append(oid)
+
+    def _try_reflow_oids(oids: List[str]) -> None:
+        if not oids:
+            return
+        need: List[str] = []
+        for oid in oids:
+            row = query_db(
+                "SELECT review_status, reflow_synced, review_l1 FROM opinion WHERE opinion_id = ?",
+                [oid],
+                fetch_all=False,
+            )
+            if not row:
+                processed_oids.add(oid)
+                continue
+            if int(row.get("review_status") or 0) != 1:
+                continue
+            if int(row.get("reflow_synced") or 0) >= 1:
+                processed_oids.add(oid)
+                continue
+            if not str(row.get("review_l1") or "").strip():
+                continue
+            need.append(oid)
+        if not need:
+            return
+        ph = ",".join(["?"] * len(need))
+        rows = query_db(
+            f"SELECT * FROM opinion WHERE opinion_id IN ({ph}) AND review_status = 1 "
+            f"AND IFNULL(reflow_synced, 0) < 1 AND TRIM(IFNULL(review_l1, '')) != ''",
+            need,
+        )
+        if not rows:
+            return
+        try:
+            from reflow_service import reflow_batch_rows
+
+            reflow_batch_rows(rows, keyword_extractor, reviewer="", trigger="pending_reflow")
+            for row in rows:
+                oid = str(row.get("opinion_id") or "").strip()
+                if oid:
+                    execute_db(
+                        "UPDATE opinion SET reflow_synced = 1 WHERE opinion_id = ?",
+                        [oid],
+                    )
+                    processed_oids.add(oid)
+            _refresh_label_matcher_gold_cache()
+            logger.info("pending reflow flushed count=%s", len(rows))
+        except Exception as e:
+            reason = str(e)[:500] or type(e).__name__
+            logger.exception("pending reflow flush failed count=%s", len(rows))
+            for row in rows:
+                oid = str(row.get("opinion_id") or "").strip()
+                if oid:
+                    _mark_reflow_row_failed(oid, reason)
+
+    _try_reflow_oids(no_batch)
+    for upload_batch, oids in by_batch.items():
+        pend = query_db(
+            "SELECT COUNT(*) as cnt FROM opinion WHERE upload_batch = ? AND review_status != 1",
+            [upload_batch],
+            fetch_all=False,
+        )
+        if pend and int(pend.get("cnt") or 0) > 0:
+            continue
+        _try_reflow_oids(oids)
+
+    if not processed_oids:
+        return
+    with _pending_reflow_lock:
+        current = _read_pending_reflow_entries()
+        remaining = [
+            e for e in current if str(e.get("opinion_id") or "").strip() not in processed_oids
+        ]
+        _write_pending_reflow_entries(remaining)
+
+
+def _flush_pending_reflow_loop() -> None:
+    while True:
+        try:
+            _flush_pending_reflow_once()
+        except Exception:
+            logger.exception("pending reflow loop error")
+        time.sleep(max(5, PENDING_REFLOW_INTERVAL))
+
+
+def _start_pending_reflow_daemon() -> None:
+    global _pending_reflow_daemon_started
+    with _pending_reflow_daemon_lock:
+        if _pending_reflow_daemon_started:
+            return
+        _pending_reflow_daemon_started = True
+    threading.Thread(
+        target=_flush_pending_reflow_loop,
+        daemon=True,
+        name="pending-reflow-flush",
+    ).start()
+    logger.info("pending reflow daemon started interval=%ss", PENDING_REFLOW_INTERVAL)
 
 
 def _start_classify_job(
@@ -996,6 +1265,9 @@ def migrate_review_human_columns():
                 typ = "INTEGER" if col == "reflow_synced" else "TEXT"
                 c.execute(f"ALTER TABLE opinion ADD COLUMN {col} {typ}")
                 print(f"已迁移：新增列 {col}")
+        if "reflow_sync_reason" not in cols:
+            c.execute("ALTER TABLE opinion ADD COLUMN reflow_sync_reason TEXT DEFAULT ''")
+            print("已迁移：新增列 reflow_sync_reason")
         conn.commit()
         conn.close()
     except sqlite3.OperationalError as e:
@@ -1098,15 +1370,18 @@ migrate_review_human_columns()
 migrate_original_text_md5_column()
 migrate_v3_materialized_columns()
 ensure_performance_indexes()
+_ensure_db_wal_mode()
 
 
 @app.on_event("startup")
 async def _on_startup_deferred_backfills():
+    _ensure_db_wal_mode()
     threading.Thread(
         target=_run_deferred_db_backfills,
         daemon=True,
         name="db-deferred-backfill",
     ).start()
+    _start_pending_reflow_daemon()
 
 # ===================== 分类准确率日志 =====================
 def log_classification_result(opinion_id: str, original_class: str, corrected_class: str, is_corrected: bool):
@@ -1441,7 +1716,10 @@ async def save_review_api(request: Request):
         corrected_class = data.get("review_note") or ""
         is_corrected = original_class != corrected_class and data["review_status"] == 1
         log_classification_result(data["opinion_id"], original_class, corrected_class, is_corrected)
-    return {"code": 200, "msg": "保存成功"}
+    queued_reflow = False
+    if int(data.get("review_status") or 0) == 1:
+        queued_reflow = _maybe_enqueue_pending_reflow(data["opinion_id"], _l1_out)
+    return {"code": 200, "msg": "保存成功", "queued_reflow": queued_reflow}
 
 # 3. 批量保存复核结果（新增）
 @app.post("/api/batch_save_review")
@@ -1476,7 +1754,24 @@ async def batch_save_review_api(request: Request):
                 ]
             )
         success_count = execute_db_many(_REVIEW_BATCH_UPDATE_SQL, batch_rows)
-        return {"code": 200, "msg": f"批量保存成功，共处理{success_count}条"}
+        queued_reflow = 0
+        confirmed_oids = [
+            str(review["opinion_id"]).strip()
+            for review in data["reviews"]
+            if review.get("opinion_id") and int(review.get("review_status") or 0) == 1
+        ]
+        for oid in confirmed_oids:
+            review_l1 = next(
+                (r.get("review_l1") for r in data["reviews"] if str(r.get("opinion_id") or "").strip() == oid),
+                None,
+            )
+            if _maybe_enqueue_pending_reflow(oid, review_l1, source="batch_save_review"):
+                queued_reflow += 1
+        return {
+            "code": 200,
+            "msg": f"批量保存成功，共处理{success_count}条",
+            "queued_reflow": queued_reflow,
+        }
     except Exception as e:
         return {"code": 500, "msg": f"批量保存失败: {str(e)}"}
 
@@ -1996,6 +2291,101 @@ async def health_check_alias():
     """兼容自动化与探活：/health 与 /api/health 等价。"""
     return await health_check()
 
+
+@app.get("/api/health/detail")
+async def health_detail_api():
+    """详细的系统健康检查（数据库、回流积压、清洗库、失败审计、年度 CSV）。"""
+    checks: Dict[str, Any] = {}
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        c = conn.cursor()
+        c.execute("PRAGMA integrity_check")
+        db_integrity = c.fetchone()[0]
+        c.execute("PRAGMA journal_mode")
+        journal_mode = c.fetchone()[0]
+        conn.close()
+        checks["db"] = {
+            "integrity_check": db_integrity,
+            "journal_mode": journal_mode,
+            "path": DB_PATH,
+            "size_bytes": os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0,
+        }
+    except Exception as e:
+        checks["db"] = {"error": str(e)}
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT COUNT(*) as cnt FROM opinion
+            WHERE reflow_synced = 0 AND review_status = 1
+            AND reviewed_at < datetime('now', '-1 day')
+            """
+        )
+        stale_reflow = c.fetchone()[0]
+        conn.close()
+        checks["stale_reflow"] = stale_reflow
+    except Exception as e:
+        checks["stale_reflow"] = {"error": str(e)}
+
+    from reflow_service import DATA_CLEAR_PATH
+
+    try:
+        n_clear = sum(1 for _ in open(DATA_CLEAR_PATH)) - 1 if DATA_CLEAR_PATH.exists() else 0
+        checks["data_clear_rows"] = max(0, n_clear)
+    except Exception:
+        checks["data_clear_rows"] = -1
+
+    try:
+        n_fail = sum(1 for _ in open(REFLOW_FAILURES_PATH)) if REFLOW_FAILURES_PATH.exists() else 0
+        checks["reflow_failures_count"] = n_fail
+    except Exception:
+        checks["reflow_failures_count"] = -1
+
+    try:
+        annual_files = list(Path(ANNUAL_DIR).glob("*.csv")) if Path(ANNUAL_DIR).exists() else []
+        checks["annual_csv_files"] = len(annual_files)
+        checks["annual_csv_paths"] = [str(f) for f in annual_files]
+    except Exception as e:
+        checks["annual_csv"] = {"error": str(e)}
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM opinion")
+        total = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM opinion WHERE review_status = 1")
+        reviewed = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM opinion WHERE reflow_synced = 0 AND review_status = 1")
+        not_reflowed = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM opinion WHERE reflow_synced = 1")
+        reflowed = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM opinion WHERE reflow_synced = 2")
+        archived = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM opinion WHERE reflow_synced = -1")
+        reflow_failed = c.fetchone()[0]
+        conn.close()
+        checks["stats"] = {
+            "total_rows": total,
+            "reviewed": reviewed,
+            "not_reflowed_yet": not_reflowed,
+            "reflow_synced_1": reflowed,
+            "reflow_synced_2_archived": archived,
+            "reflow_synced_minus1_failed": reflow_failed,
+        }
+    except Exception as e:
+        checks["stats"] = {"error": str(e)}
+
+    stale_val = checks.get("stale_reflow", 0)
+    stale_ok = isinstance(stale_val, int) and stale_val == 0
+    db_ok = "error" not in str(checks.get("db", {}))
+    checks["status"] = "healthy" if stale_ok and db_ok else "degraded"
+
+    return {"code": 200, "data": checks}
+
+
 def _apply_yearly_archive_for_batch(upload_batch: str, reviewer: str) -> Dict[str, Any]:
     """批次内全部已复核时：对未归档行执行回流、写入年度 CSV、reflow_synced=2（2=已年度归档，防重复加权/重复操作计数）。"""
     check_sql = "SELECT COUNT(*) as cnt FROM opinion WHERE upload_batch = ? AND review_status != 1"
@@ -2160,6 +2550,13 @@ async def list_annual_csv_api():
         return {"code": 500, "msg": str(e), "data": {"years": [], "files": []}}
 
 
+@app.get("/api/reflow_failures")
+async def get_reflow_failures_api(limit: int = 50):
+    """返回 reflow_failures.jsonl 中最近 N 条回流失败记录（默认 50）。"""
+    cap = max(1, min(int(limit or 50), 200))
+    return {"code": 200, "msg": "ok", "data": _read_reflow_failures(cap)}
+
+
 @app.post("/api/confirm_review")
 @app.post("/confirm_review")
 async def confirm_review_api(request: Request):
@@ -2209,13 +2606,18 @@ async def confirm_review_api(request: Request):
             text = base.get("original_text") or ""
             kws = keyword_extractor.extract_keywords(text)[:35]
             extracted = ",".join(kws)
+            existing_l1 = (base.get("review_l1") or "").strip()
+            existing_l2 = (base.get("review_l2") or "").strip()
+            existing_reflow = int(base.get("reflow_synced") or 0)
+            labels_changed = (l1 != existing_l1) or (l2 != existing_l2)
+            reflow_synced_val = 0 if labels_changed else existing_reflow
             cur.execute(
                 """UPDATE opinion SET review_status=1, review_l1=?, review_l2=?, review_note=?,
-                extracted_keywords=?, reviewer=?, reviewed_at=?, review_l3='', reflow_synced=0
+                extracted_keywords=?, reviewer=?, reviewed_at=?, review_l3='', reflow_synced=?
                 WHERE opinion_id=?""",
-                [l1, l2, note, extracted, reviewer or None, now, oid],
+                [l1, l2, note, extracted, reviewer or None, now, reflow_synced_val, oid],
             )
-            if with_reflow:
+            if with_reflow and labels_changed:
                 merged = {
                     **base,
                     "review_l1": l1,
@@ -2338,7 +2740,8 @@ def _dashboard_stats_compute() -> Dict[str, Any]:
     dash_sql = """SELECT create_time, reviewed_at, created_at, review_status,
         review_l1, review_l2, model_class, model_keyword, reflow_synced,
         v3_l1, v3_l2, v3_confidence, match_score, v3_label_meta
-        FROM opinion"""
+        FROM opinion
+        WHERE create_time >= date('now', '-2 year')"""
 
     def _parse_v3_meta_fields(meta_raw: Any) -> Tuple[str, str, Optional[float]]:
         """返回 (j_l1, j_l2, confidence)；与旧版一致：仅当 JSON 成功解析为 dict 时 conf 有值（缺省 0）。"""
@@ -3103,6 +3506,7 @@ if __name__ == "__main__":
     print(f"数据库: {os.path.basename(DB_PATH)}")
     print(f"关键词词库: {KEYWORD_FILE}")
     print("=" * 50)
+    _start_pending_reflow_daemon()
     _reload = os.environ.get("VOC_UVICORN_RELOAD", "").strip().lower() in ("1", "true", "yes")
     _workers = max(1, int(os.environ.get("VOC_UVICORN_WORKERS", "1") or "1"))
     if _reload:

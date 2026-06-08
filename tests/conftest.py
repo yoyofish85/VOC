@@ -18,6 +18,23 @@ import pytest
 BASE_URL = os.environ.get("VOC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
+def _skip_api_healthcheck(pytestconfig: pytest.Config) -> bool:
+    """tests/unit 离线单测无需启动 FastAPI；也可用 VOC_UNIT_ONLY=1 显式跳过。"""
+    if os.environ.get("VOC_UNIT_ONLY") == "1":
+        return True
+    args = pytestconfig.args
+    if not args:
+        return False
+    for arg in args:
+        norm = str(arg).replace("\\", "/")
+        if norm.startswith("tests/unit") or "/tests/unit/" in norm:
+            continue
+        if norm.startswith("unit/"):
+            continue
+        return False
+    return True
+
+
 @pytest.fixture(scope="session")
 def api_base() -> str:
     return BASE_URL
@@ -87,8 +104,8 @@ def get_list(
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _session_healthcheck(api_client: httpx.Client) -> None:
-    if os.environ.get("VOC_UNIT_ONLY") == "1":
+def _session_healthcheck(api_client: httpx.Client, pytestconfig: pytest.Config) -> None:
+    if _skip_api_healthcheck(pytestconfig):
         return
     r = api_client.get("/health")
     assert r.status_code == 200, f"后端未就绪: {r.text}"

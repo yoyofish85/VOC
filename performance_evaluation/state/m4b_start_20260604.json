@@ -1,0 +1,30 @@
+{
+  "milestone": "M4-B1",
+  "started_at": "2026-06-04",
+  "baseline_l1_pct": 84.11,
+  "baseline_l1_correct": 1938,
+  "chosen_track": "regression_217",
+  "chosen_reason": "池子 217 条约为跨类 92 的 2.4x；M4-A guard 路径已验证 +21；Top L1 错误均在此池",
+  "deferred_track": "other_l1_92",
+  "rule_version": "v12_m4b_r1",
+  "cache_key": "classify_v12_m4b_r1",
+  "targets": {
+    "conservative_fixes": 15,
+    "conservative_l1_pct": 84.76,
+    "baseline_fixes": 25,
+    "baseline_l1_pct": 85.19,
+    "optimistic_fixes": 40,
+    "optimistic_l1_pct": 85.84
+  },
+  "gates": {
+    "primary_broken_max": 2,
+    "regression_broken_max": 8
+  },
+  "server_commands": [
+    "python3 performance_evaluation/analyze_m4b.py",
+    "python3 performance_evaluation/eval_p1_subset.py --compare --export-regression-fixable auto --export-regression-unfixed auto",
+    "python3 performance_evaluation/replay_unfixed_csv.py latest",
+    "python3 performance_evaluation/patch_p1_regression_v3.py --csv performance_evaluation/exports/p1_regression_fixable_*.csv --write",
+    "python3 performance_evaluation/evaluate_accuracy.py"
+  ]
+}
