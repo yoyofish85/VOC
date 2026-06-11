@@ -1,4 +1,5 @@
 update.zip
+update.zip.md5
 backup/*
 !backup/.gitkeep
 voc_launcher_*.log

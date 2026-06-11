@@ -6,14 +6,30 @@
 # 或：
 #   bash code_deploy/package_code.sh
 #
+# 测试/CI 可选：
+#   SKIP_FRONTEND_BUILD=1 ALLOW_DIRTY_PACK=1 ./code_deploy/package_code.sh
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUT_ZIP="$SCRIPT_DIR/update.zip"
+OUT_MD5="$SCRIPT_DIR/update.zip.md5"
 STAGE="$(mktemp -d)"
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT
+
+write_md5_file() {
+  local zip_path="$1"
+  local md5_path="$2"
+  local hash=""
+  if command -v md5sum >/dev/null 2>&1; then
+    hash="$(md5sum "$zip_path" | awk '{print $1}')"
+  else
+    hash="$(md5 -q "$zip_path")"
+  fi
+  echo "$hash  $(basename "$zip_path")" >"$md5_path"
+}
 
 echo "============================================================"
 echo " VOC_V1.5 · 离线代码打包（仅 src/，排除数据与依赖）"
@@ -27,21 +43,58 @@ if [[ ! -d "$ROOT/src/frontend" ]] || [[ ! -d "$ROOT/src/backend" ]]; then
   exit 1
 fi
 
-echo "[1/4] 正在执行前端生产构建 (npm run build)..."
+DEPLOY_TAG=""
+GIT_COMMIT=""
+if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [[ "${ALLOW_DIRTY_PACK:-0}" != "1" ]] && ! git -C "$ROOT" diff-index --quiet HEAD --; then
+    echo "[错误] 工作区有未提交修改，请先 commit 或 stash 后再打包（不自动 commit）。"
+    echo ""
+    git -C "$ROOT" status --short
+    exit 1
+  fi
+  DEPLOY_TAG="deploy_$(date +%Y%m%d_%H%M)"
+  GIT_COMMIT="$(git -C "$ROOT" rev-parse --short HEAD)"
+  if [[ "${SKIP_GIT_TAG:-0}" == "1" ]]; then
+    echo "[0/5] SKIP_GIT_TAG=1 — 跳过 git tag（测试模式）"
+  else
+    if git -C "$ROOT" tag -l "$DEPLOY_TAG" | grep -qx "$DEPLOY_TAG"; then
+      echo "[错误] git tag 已存在: $DEPLOY_TAG，请等待 1 分钟后重试。"
+      exit 1
+    fi
+    git -C "$ROOT" tag "$DEPLOY_TAG"
+    echo "[0/5] git tag: $DEPLOY_TAG (commit: $GIT_COMMIT)"
+  fi
+else
+  DEPLOY_TAG="deploy_$(date +%Y%m%d_%H%M)_nogit"
+  echo "[0/5] 非 git 仓库，跳过 tag（manifest 使用 $DEPLOY_TAG）"
+fi
+echo ""
+
+echo "[1/5] 正在执行前端生产构建 (npm run build)..."
 cd "$ROOT/src/frontend"
 if [[ ! -f package.json ]]; then
   echo "[错误] 缺少 src/frontend/package.json"
   exit 1
 fi
-if [[ ! -d node_modules ]]; then
-  echo "  → 首次打包：正在 npm install ..."
-  npm install
+if [[ "${SKIP_FRONTEND_BUILD:-0}" == "1" ]]; then
+  echo "  → SKIP_FRONTEND_BUILD=1：跳过 npm run build"
+  mkdir -p "$ROOT/src/frontend/dist"
+  if [[ ! -f "$ROOT/src/frontend/dist/index.html" ]]; then
+    echo '<!DOCTYPE html><html><head><title>VOC</title></head><body></body></html>' \
+      >"$ROOT/src/frontend/dist/index.html"
+    echo "  → 已写入占位 dist/index.html"
+  fi
+else
+  if [[ ! -d node_modules ]]; then
+    echo "  → 首次打包：正在 npm install ..."
+    npm install
+  fi
+  npm run build
 fi
-npm run build
 echo "  [✓] 前端构建完成 → src/frontend/dist/"
 echo ""
 
-echo "[2/4] 正在组装临时目录（排除 node_modules、缓存、数据库等）..."
+echo "[2/5] 正在组装临时目录（排除 node_modules、缓存、数据库等）..."
 mkdir -p "$STAGE/src"
 
 rsync -a \
@@ -64,11 +117,43 @@ rsync -a \
 
 mkdir -p "$STAGE/src/frontend/dist"
 rsync -a "$ROOT/src/frontend/dist/" "$STAGE/src/frontend/dist/"
-echo "  [✓] 已写入最新 dist/"
+
+PACKED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+python3 - "$STAGE/src/deploy_manifest.json" "$DEPLOY_TAG" "$GIT_COMMIT" "$PACKED_AT" "$ROOT" <<'PY'
+import json, subprocess, sys
+from pathlib import Path
+
+manifest_path, tag, commit, packed_at, root = sys.argv[1:6]
+changed = []
+if Path(root, ".git").exists():
+    for args in (["diff", "--name-only", "HEAD~1", "HEAD"], ["diff", "--name-only", "HEAD"]):
+        r = subprocess.run(
+            ["git", "-C", root, *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            changed = r.stdout.strip().splitlines()[:200]
+            break
+with open(manifest_path, "w", encoding="utf-8") as f:
+    json.dump(
+        {
+            "deploy_tag": tag,
+            "git_commit": commit,
+            "packed_at": packed_at,
+            "changed_files": changed,
+        },
+        f,
+        ensure_ascii=False,
+        indent=2,
+    )
+PY
+echo "  [✓] 已写入最新 dist/ 与 deploy_manifest.json"
 echo ""
 
-echo "[3/4] 正在生成 zip..."
-rm -f "$OUT_ZIP"
+echo "[3/5] 正在生成 zip..."
+rm -f "$OUT_ZIP" "$OUT_MD5"
 (
   cd "$STAGE"
   zip -r -q "$OUT_ZIP" src
@@ -77,18 +162,36 @@ BYTES=$(stat -f%z "$OUT_ZIP" 2>/dev/null || stat -c%s "$OUT_ZIP" 2>/dev/null || 
 echo "  [✓] 已生成 update.zip（约 $BYTES 字节）"
 echo ""
 
-echo "[4/4] 校验 zip 内顶层结构..."
+echo "[4/5] 生成 MD5 校验文件..."
+write_md5_file "$OUT_ZIP" "$OUT_MD5"
+echo "  [✓] $OUT_MD5"
+echo ""
+
+echo "[5/5] 校验 zip 内顶层结构..."
 if ! unzip -l "$OUT_ZIP" | head -20 | grep -q 'src/'; then
   echo "[警告] zip 内未检测到 src/ 前缀，请检查。"
 else
   echo "  [✓] 包含 src/ 目录结构"
 fi
+python3 - "$OUT_ZIP" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as zf:
+    bad = [n for n in zf.namelist() if n.endswith((".db", ".sqlite", ".db-shm", ".db-wal"))]
+if bad:
+    print("[错误] zip 内检测到数据库/WAL 文件:", bad[:5])
+    sys.exit(1)
+print("  [✓] 未包含 .db / .sqlite / .db-shm / .db-wal")
+PY
 
 echo ""
 echo "============================================================"
 echo " 打包完成"
 echo "============================================================"
-echo "请将本目录下的 update.zip 离线拷贝到服务器，然后在服务器上执行："
+echo "deploy tag : $DEPLOY_TAG"
+echo "输出文件   : $OUT_ZIP"
+echo "MD5 校验   : $OUT_MD5"
+echo ""
+echo "请将 update.zip 与 update.zip.md5 离线拷贝到服务器，然后执行："
 echo "  ./code_deploy/update_server.sh"
 echo ""
 echo "安全说明：本包仅含 src/ 源码与前端 dist，不含 data/、*.db、label_project/。"

@@ -4,6 +4,8 @@
 # 用法：
 #   ./code_deploy/update_server.sh                    # 默认使用 code_deploy/update.zip
 #   ./code_deploy/update_server.sh /path/to/update.zip
+#   ./code_deploy/update_server.sh --check-only       # 仅校验 MD5 与包内依赖，不覆盖 src/
+#   ./code_deploy/update_server.sh --rollback         # 回滚到上一备份
 #
 # 可选：更新完成后自动后台启动
 #   AUTO_START=1 ./code_deploy/update_server.sh
@@ -12,13 +14,170 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VOC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ZIP="${1:-$SCRIPT_DIR/update.zip}"
+
+CHECK_ONLY=0
+DO_ROLLBACK=0
+ZIP=""
+
+usage() {
+  cat <<EOF
+用法:
+  $0 [选项] [update.zip路径]
+
+选项:
+  --check-only   仅校验 MD5 与 zip 内依赖，不修改 src/
+  --rollback     自动回滚到最近一次 src 备份
+  -h, --help     显示帮助
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --check-only)
+      CHECK_ONLY=1
+      shift
+      ;;
+    --rollback)
+      DO_ROLLBACK=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "[错误] 未知选项: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      ZIP="$1"
+      shift
+      ;;
+  esac
+done
+
+ZIP="${ZIP:-$SCRIPT_DIR/update.zip}"
+
+if [[ "$DO_ROLLBACK" == "1" ]]; then
+  echo "============================================================"
+  echo " VOC_V1.5 · 自动回滚"
+  echo "============================================================"
+  exec "$SCRIPT_DIR/rollback_server.sh" -y
+fi
+
+verify_md5() {
+  local zip_path="$1"
+  local md5_path="${zip_path}.md5"
+  if [[ ! -f "$md5_path" ]]; then
+    echo "[错误] 未找到 MD5 校验文件: $md5_path"
+    exit 1
+  fi
+  local dir base
+  dir="$(cd "$(dirname "$zip_path")" && pwd)"
+  base="$(basename "$zip_path")"
+  echo "  → 校验 MD5: $md5_path"
+  if command -v md5sum >/dev/null 2>&1; then
+    (cd "$dir" && md5sum -c "${base}.md5") || {
+      echo "[错误] MD5 校验失败，中止部署。"
+      exit 1
+    }
+  else
+    local expected actual
+    expected="$(awk '{print $1}' "$md5_path")"
+    actual="$(md5 -q "$zip_path")"
+    if [[ "$expected" != "$actual" ]]; then
+      echo "[错误] MD5 不匹配: 期望 $expected，实际 $actual"
+      exit 1
+    fi
+    echo "  [✓] MD5 校验通过 (macOS md5)"
+  fi
+}
+
+archive_md5() {
+  local zip_path="$1"
+  local md5_path="${zip_path}.md5"
+  local day_dir="$SCRIPT_DIR/backup/$(date +%Y%m%d)"
+  mkdir -p "$day_dir"
+  if [[ -f "$md5_path" ]]; then
+    cp -f "$md5_path" "$day_dir/"
+    echo "  [✓] MD5 已归档 → $day_dir/$(basename "$md5_path")"
+  fi
+}
+
+check_zip_dependencies() {
+  local zip_path="$1"
+  echo "  → 检查 zip 内关键路径..."
+  python3 - "$zip_path" <<'PY'
+import sys, zipfile
+zpath = sys.argv[1]
+with zipfile.ZipFile(zpath) as zf:
+    names = zf.namelist()
+bad = [n for n in names if n.endswith((".db", ".sqlite", ".db-shm", ".db-wal"))]
+if bad:
+    print("[错误] zip 内包含数据库/WAL 文件:", bad[:5])
+    sys.exit(1)
+if not any(n.endswith("src/backend/main.py") for n in names):
+    print("[错误] zip 内缺少 src/backend/main.py")
+    sys.exit(1)
+if not any("src/frontend/dist/" in n for n in names):
+    print("[错误] zip 内缺少 src/frontend/dist/")
+    sys.exit(1)
+print("  [✓] zip 依赖检查通过")
+PY
+}
+
+clean_wal_before_overwrite() {
+  echo "  → 覆盖前清理目标 src/ 下 SQLite WAL 残留..."
+  local removed=0
+  while IFS= read -r -d '' f; do
+    echo "  → 删除 WAL 文件: $f"
+    rm -f "$f"
+    removed=$((removed + 1))
+  done < <(find "$VOC_ROOT/src" \( -name '*.db-shm' -o -name '*.db-wal' \) -print0 2>/dev/null)
+  if [[ "$removed" -eq 0 ]]; then
+    echo "  [✓] 未发现 WAL 残留"
+  else
+    echo "  [✓] 已清理 $removed 个 WAL 文件"
+  fi
+}
+
+print_deploy_summary() {
+  local manifest="$VOC_ROOT/src/deploy_manifest.json"
+  local backup_path="${1:-}"
+  echo ""
+  echo "—— 部署摘要 ——"
+  if [[ -f "$manifest" ]]; then
+    python3 - "$manifest" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as f:
+    m = json.load(f)
+print(f"  deploy tag : {m.get('deploy_tag', '—')}")
+print(f"  git commit : {m.get('git_commit', '—')}")
+print(f"  packed_at  : {m.get('packed_at', '—')}")
+changed = m.get("changed_files") or []
+if changed:
+    print("  打包变更文件:")
+    for p in changed[:30]:
+        print(f"    - {p}")
+    if len(changed) > 30:
+        print(f"    ... 共 {len(changed)} 个文件")
+PY
+  else
+    echo "  deploy tag : （zip 内无 deploy_manifest.json）"
+  fi
+  if [[ -n "$backup_path" ]] && [[ -d "$backup_path" ]]; then
+    echo "  本次覆盖差异（相对备份）:"
+    diff -rq "$backup_path" "$VOC_ROOT/src" 2>/dev/null | head -40 || true
+  fi
+}
 
 echo "============================================================"
 echo " VOC_V1.5 · 服务器一键更新（仅 src/）"
 echo "============================================================"
 echo "项目根: $VOC_ROOT"
 echo "更新包: $ZIP"
+[[ "$CHECK_ONLY" == "1" ]] && echo "模式  : --check-only（不修改 src/）"
 echo ""
 
 if [[ ! -f "$ZIP" ]]; then
@@ -32,6 +191,30 @@ if [[ ! -d "$VOC_ROOT/src/backend" ]]; then
   exit 1
 fi
 
+echo "[1] MD5 校验..."
+verify_md5 "$ZIP"
+archive_md5 "$ZIP"
+echo ""
+
+echo "[2] zip 依赖检查..."
+check_zip_dependencies "$ZIP"
+echo ""
+
+if [[ "$CHECK_ONLY" == "1" ]]; then
+  echo "[3] 本地前端依赖检查..."
+  FE="$VOC_ROOT/src/frontend"
+  if [[ -f "$FE/package.json" ]] && [[ ! -d "$FE/node_modules" ]]; then
+    echo "  [提示] src/frontend 无 node_modules，部署后需 npm install"
+  else
+    echo "  [✓] 前端 node_modules 就绪或无需安装"
+  fi
+  echo ""
+  echo "============================================================"
+  echo " --check-only 完成：未修改 src/"
+  echo "============================================================"
+  exit 0
+fi
+
 stop_ports() {
   local port pid
   for port in 8000 8080; do
@@ -43,7 +226,7 @@ stop_ports() {
   done
 }
 
-echo "[1/6] 正在停止本机 VOC 相关进程（8000 / 8080）..."
+echo "[3/7] 正在停止本机 VOC 相关进程（8000 / 8080）..."
 stop_ports
 sleep 2
 stop_ports || true
@@ -53,13 +236,14 @@ echo ""
 STAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="$SCRIPT_DIR/backup"
 BACKUP_PATH="$BACKUP_DIR/src_backup_$STAMP"
-echo "[2/6] 正在备份当前 src/ → $BACKUP_PATH"
+echo "[4/7] 正在备份当前 src/ → $BACKUP_PATH"
 mkdir -p "$BACKUP_DIR"
 cp -R "$VOC_ROOT/src" "$BACKUP_PATH"
 echo "  [✓] 备份完成（可回滚）"
 echo ""
 
-echo "[3/6] 正在解压更新包..."
+echo "[5/7] 覆盖前清理 WAL + 解压更新包..."
+clean_wal_before_overwrite
 TMP="$(mktemp -d)"
 unzip -q -o "$ZIP" -d "$TMP"
 if [[ ! -d "$TMP/src" ]]; then
@@ -70,25 +254,13 @@ fi
 echo "  [✓] 解压完成"
 echo ""
 
-echo "[4/6] 正在合并覆盖 src/（不删除 data/、不覆盖项目根下配置）..."
-# 仅将包内 src 同步到项目 src：不删除目标中多余文件，降低误删风险
+echo "[6/7] 正在合并覆盖 src/（不删除 data/、不覆盖项目根下配置）..."
 rsync -a "$TMP/src/" "$VOC_ROOT/src/"
 rm -rf "$TMP"
-
-# 清理 SQLite WAL 残留（不应存在于部署包；若存在说明前次部署带入，可能损坏数据库）
-WAL_REMOVED=0
-while IFS= read -r -d '' f; do
-  rm -f "$f"
-  WAL_REMOVED=$((WAL_REMOVED + 1))
-done < <(find "$VOC_ROOT/src" \( -name '*.db-shm' -o -name '*.db-wal' \) -print0 2>/dev/null)
-if [[ "$WAL_REMOVED" -gt 0 ]]; then
-  echo "  → 已清理 $WAL_REMOVED 个 SQLite WAL 残留文件 (*.db-shm / *.db-wal)"
-fi
-
 echo "  [✓] src/ 已更新"
 echo ""
 
-echo "[5/6] 前端依赖检查（若无 node_modules 则安装）..."
+echo "[7/7] 前端依赖检查（若无 node_modules 则安装）..."
 FE="$VOC_ROOT/src/frontend"
 if [[ -f "$FE/package.json" ]] && [[ ! -d "$FE/node_modules" ]]; then
   echo "  → 正在 npm install ..."
@@ -97,12 +269,18 @@ fi
 echo "  [✓] 前端依赖就绪"
 echo ""
 
-echo "[6/6] 更新流程结束"
 echo "============================================================"
 echo " 更新成功 — 历史数据未修改（未触碰 data/、*.db、label_project/）"
 echo "============================================================"
 echo "备份位置: $BACKUP_PATH"
+print_deploy_summary "$BACKUP_PATH"
 echo ""
+
+if [[ -f "$SCRIPT_DIR/deploy_checklist.py" ]]; then
+  echo "运行部署自检: python3 code_deploy/deploy_checklist.py"
+  python3 "$SCRIPT_DIR/deploy_checklist.py" || echo "  [警告] 部署自检未全部通过，请查看上方输出"
+  echo ""
+fi
 
 if [[ "${AUTO_START:-0}" == "1" ]]; then
   LOG="$SCRIPT_DIR/voc_launcher_${STAMP}.log"

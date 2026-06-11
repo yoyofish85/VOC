@@ -70,3 +70,47 @@ def test_draft_save_reviews_bindings(draft_client: TestClient) -> None:
     assert len(rows) == 1
     assert rows[0].get("review_status") == 1
     assert rows[0].get("review_l1") == "产品质量类"
+
+
+def test_draft_save_unchanged_labels_preserves_reflow_synced(draft_client: TestClient) -> None:
+    """标签未变时保留 reflow_synced，避免多余回流 IO（与 confirm_review 一致）。"""
+    import importlib
+    import sys
+    from pathlib import Path
+
+    backend_dir = Path(__file__).resolve().parents[2] / "src" / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+    main_mod = importlib.import_module("main")
+    from main import execute_db
+
+    execute_db(
+        """INSERT INTO opinion (
+            opinion_id, original_text, create_time, upload_batch,
+            review_status, review_l1, review_l2, reflow_synced
+        ) VALUES (?, ?, ?, ?, 0, ?, ?, ?)""",
+        ["DRAFT_T002", "标签未变暂存", "2025-10-02", "BATCH_DRAFT_T", "产品质量类", "车机", 1],
+    )
+    r = draft_client.post(
+        "/draft_save_reviews",
+        json={
+            "reviews": [
+                {
+                    "opinion_id": "DRAFT_T002",
+                    "review_l1": "产品质量类",
+                    "review_l2": "车机",
+                }
+            ],
+            "reviewer": "pytest",
+            "with_reflow": True,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("code") == 200, body.get("msg")
+    row = main_mod.query_db(
+        "SELECT reflow_synced FROM opinion WHERE opinion_id = ?",
+        ["DRAFT_T002"],
+        fetch_all=False,
+    )
+    assert int(row.get("reflow_synced") or 0) == 1

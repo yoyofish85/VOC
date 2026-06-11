@@ -629,7 +629,7 @@ const _FALLBACK_L2_BY_L1 = {
   体验需求类: ['功能建议', '体验优化', '性能提升', 'UI/UX建议', '配置诉求'],
   非问题: ['咨询与表扬', '其他非问题']
 }
-const fallbackL2ForL1 = (l1) => {
+const _FALLBACK_L2_FOR_L1 = (l1) => {
   const key = (l1 || '').trim()
   return _FALLBACK_L2_BY_L1[key] || _FALLBACK_L2_LIST
 }
@@ -664,6 +664,9 @@ const execRowAutoSave = async (row) => {
     if (res.code !== 200) {
       console.error('自动保存失败', res.msg)
       return
+    }
+    if (res.queued_reflow) {
+      ElMessage.info({ message: '已在后台加入回流队列', grouping: true, duration: 2000 })
     }
     if (Number(row.review_status) === 1) {
       row.reviewed_at = row.reviewed_at || isoReviewTimestamp()
@@ -1328,7 +1331,7 @@ const mergeL2OptionsList = (baseList, row) => {
   let b = Array.isArray(baseList) ? [...baseList] : []
   if (!b.length) {
     const l1 = (row?.canonical_l1 || '').trim() || effectiveL1ForRow(row)
-    b = [...fallbackL2ForL1(l1)]
+    b = [..._FALLBACK_L2_FOR_L1(l1)]
   }
   const cur = (row?.review_l2 || '').trim()
   const v3 = cleanV3L2(row)

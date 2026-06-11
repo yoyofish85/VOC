@@ -29,6 +29,8 @@ def _skip_api_healthcheck(pytestconfig: pytest.Config) -> bool:
         norm = str(arg).replace("\\", "/")
         if norm.startswith("tests/unit") or "/tests/unit/" in norm:
             continue
+        if norm.startswith("tests/test_deploy") or "/tests/test_deploy" in norm:
+            continue
         if norm.startswith("unit/"):
             continue
         return False

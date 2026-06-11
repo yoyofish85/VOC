@@ -1364,13 +1364,19 @@ def _run_deferred_db_backfills():
         logger.exception("original_text_md5 后台回填失败")
 
 
-init_db()
-migrate_v3_columns()
-migrate_review_human_columns()
-migrate_original_text_md5_column()
-migrate_v3_materialized_columns()
-ensure_performance_indexes()
-_ensure_db_wal_mode()
+def _verify_and_migrate_db() -> None:
+    """模块加载时：迁移 schema、启用 WAL、启动延迟回流 daemon。"""
+    init_db()
+    migrate_v3_columns()
+    migrate_review_human_columns()
+    migrate_original_text_md5_column()
+    migrate_v3_materialized_columns()
+    ensure_performance_indexes()
+    _ensure_db_wal_mode()
+    _start_pending_reflow_daemon()
+
+
+_verify_and_migrate_db()
 
 
 @app.on_event("startup")
@@ -1843,9 +1849,16 @@ async def draft_save_reviews_api(request: Request):
             text = base.get("original_text") or ""
             kws = keyword_extractor.extract_keywords(text)[:35]
             extracted = ",".join(kws)
-            draft_updates.append([l1, l2, note, extracted, reviewer or None, now, oid])
+            existing_l1 = (base.get("review_l1") or "").strip()
+            existing_l2 = (base.get("review_l2") or "").strip()
+            existing_reflow = int(base.get("reflow_synced") or 0)
+            labels_changed = (l1 != existing_l1) or (l2 != existing_l2)
+            reflow_synced_val = 0 if labels_changed else existing_reflow
+            draft_updates.append(
+                [l1, l2, note, extracted, reviewer or None, now, reflow_synced_val, oid]
+            )
             n += 1
-            if with_reflow:
+            if with_reflow and labels_changed:
                 rows_for_reflow.append(
                     {
                         **base,
@@ -1860,7 +1873,7 @@ async def draft_save_reviews_api(request: Request):
         if draft_updates:
             execute_db_many(
                 """UPDATE opinion SET review_status=1, review_l1=?, review_l2=?, review_note=?,
-                extracted_keywords=?, reviewer=?, reviewed_at=?, review_l3='', reflow_synced=0
+                extracted_keywords=?, reviewer=?, reviewed_at=?, review_l3='', reflow_synced=?
                 WHERE opinion_id=?""",
                 draft_updates,
             )
@@ -3506,6 +3519,7 @@ if __name__ == "__main__":
     print(f"数据库: {os.path.basename(DB_PATH)}")
     print(f"关键词词库: {KEYWORD_FILE}")
     print("=" * 50)
+    _ensure_db_wal_mode()
     _start_pending_reflow_daemon()
     _reload = os.environ.get("VOC_UVICORN_RELOAD", "").strip().lower() in ("1", "true", "yes")
     _workers = max(1, int(os.environ.get("VOC_UVICORN_WORKERS", "1") or "1"))

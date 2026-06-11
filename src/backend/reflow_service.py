@@ -286,7 +286,12 @@ def reflow_batch_rows(
         _write_data_clear_full(by_id, order)
 
     if merge_gold and gold_items:
-        merge_gold_feedback(gold_items)
+        gold_res = merge_gold_feedback(gold_items)
+        if int(gold_res.get("code") or 0) != 200:
+            raise RuntimeError(str(gold_res.get("msg") or "merge_gold_feedback failed"))
+
+    if rows and n_ok == 0:
+        raise RuntimeError(errs[0] if errs else "reflow_batch_rows: no rows reflowed")
 
     return {
         "code": 200,
