@@ -1569,7 +1569,7 @@ const saveDraftReviews = async () => {
       reviews,
       reviewer: reviewerName.value || undefined
     })
-    if res.code === 200) {
+    if (res.code === 200) {
       ElMessage.success(res.msg || '已暂存')
       if (!res.reflow_async && Number(res.reflowed || 0) === 0) {
         ElMessage.info(
