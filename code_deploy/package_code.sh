@@ -8,6 +8,7 @@
 #
 # 测试/CI 可选：
 #   SKIP_FRONTEND_BUILD=1 ALLOW_DIRTY_PACK=1 ./code_deploy/package_code.sh
+#   AUTO_COMMIT_PACK=0  — 禁止打包前自动 commit（默认开启）
 #
 set -euo pipefail
 
@@ -47,10 +48,24 @@ DEPLOY_TAG=""
 GIT_COMMIT=""
 if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [[ "${ALLOW_DIRTY_PACK:-0}" != "1" ]] && ! git -C "$ROOT" diff-index --quiet HEAD --; then
-    echo "[错误] 工作区有未提交修改，请先 commit 或 stash 后再打包（不自动 commit）。"
-    echo ""
-    git -C "$ROOT" status --short
-    exit 1
+    if [[ "${AUTO_COMMIT_PACK:-1}" == "1" ]]; then
+      PACK_TS="$(date +%Y%m%d_%H%M%S)"
+      echo "[0/5] 工作区有未提交修改，自动 commit 后继续打包..."
+      git -C "$ROOT" status --short
+      git -C "$ROOT" add -A
+      if git -C "$ROOT" diff-index --quiet HEAD --cached; then
+        echo "[警告] 仅有未跟踪且被 .gitignore 忽略的文件，跳过 commit。"
+      else
+        git -C "$ROOT" commit -m "chore(deploy): auto-commit before pack ${PACK_TS}"
+        echo "  [✓] 已自动 commit: chore(deploy): auto-commit before pack ${PACK_TS}"
+      fi
+    else
+      echo "[错误] 工作区有未提交修改，请先 commit 或 stash 后再打包。"
+      echo "  提示: AUTO_COMMIT_PACK=1（默认）可自动 commit；ALLOW_DIRTY_PACK=1 可跳过检查。"
+      echo ""
+      git -C "$ROOT" status --short
+      exit 1
+    fi
   fi
   DEPLOY_TAG="deploy_$(date +%Y%m%d_%H%M)"
   GIT_COMMIT="$(git -C "$ROOT" rev-parse --short HEAD)"

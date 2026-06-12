@@ -12,7 +12,10 @@ src/frontend/dist/
 
 # 运行数据（按需提交 data/annual 归档策略由团队决定）
 data/temp/
-*.DS_Store
+.DS_Store
+**/.DS_Store
+*.bak
+code_deploy.zip
 
 # 日志与测试产物
 reports/junit.xml
