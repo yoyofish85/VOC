@@ -139,3 +139,75 @@ def test_get_reflow_failures_api(reflow_client) -> None:
     assert len(data) >= 1
     assert data[0].get("opinion_id") == "RF_T001"
     assert "pytest failure sample" in (data[0].get("reason") or "")
+
+
+def test_reflow_failure_sets_synced_minus_one_or_success(reflow_client) -> None:
+    """确认复核后后台回流完成：reflow_synced 应为 1（成功）或 -1（失败），不应卡在 0。"""
+    client, main_mod, _, _ = reflow_client
+
+    class _InlineThread:
+        def __init__(self, target=None, args=(), kwargs=None, daemon=None, **kw):
+            self._target = target
+
+        def start(self):
+            if self._target:
+                self._target()
+
+    with patch.object(threading, "Thread", _InlineThread):
+        r = _confirm(client, "RF_T002", "体验需求类", "内饰")
+        assert r.status_code == 200
+
+    synced, _ = _reflow_synced(main_mod, "RF_T002")
+    assert synced in (1, -1)
+
+
+def test_reflow_failure_endpoint_returns_failures(reflow_client) -> None:
+    client, main_mod, failures_path, _ = reflow_client
+    main_mod._append_reflow_failure_jsonl("RF_T002", "endpoint mock failure")
+
+    r = client.get("/api/reflow_failures", params={"limit": 10})
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("code") == 200
+    ids = {item.get("opinion_id") for item in (body.get("data") or [])}
+    assert "RF_T002" in ids
+    assert failures_path.is_file()
+
+
+def test_reflow_failure_multiple_rows(reflow_client) -> None:
+    client, main_mod, _, _ = reflow_client
+    from main import execute_db
+
+    execute_db(
+        """INSERT INTO opinion (
+            opinion_id, original_text, create_time, upload_batch,
+            review_status, review_l1, review_l2, reflow_synced
+        ) VALUES (?, ?, ?, ?, 0, ?, ?, 0)""",
+        ["RF_T003", "第三条", "2025-10-03", "BATCH_RF_T", "服务类", "销售"],
+    )
+
+    class _InlineThread:
+        def __init__(self, target=None, args=(), kwargs=None, daemon=None, **kw):
+            self._target = target
+
+        def start(self):
+            if self._target:
+                self._target()
+
+    with patch.object(threading, "Thread", _InlineThread):
+        r = client.post(
+            "/confirm_review",
+            json={
+                "reviews": [
+                    {"opinion_id": "RF_T002", "review_l1": "体验需求类", "review_l2": "内饰"},
+                    {"opinion_id": "RF_T003", "review_l1": "产品质量类", "review_l2": "车机"},
+                ],
+                "reviewer": "pytest",
+                "with_reflow": True,
+            },
+        )
+        assert r.status_code == 200
+
+    for oid in ("RF_T002", "RF_T003"):
+        synced, _ = _reflow_synced(main_mod, oid)
+        assert synced in (1, -1), f"{oid} reflow_synced={synced}"
