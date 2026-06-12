@@ -3,6 +3,7 @@
 """部署后健康自检：行数、WAL、import、前端 dist、/api/health。"""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sqlite3
@@ -95,6 +96,13 @@ def _http_get_json(path: str) -> Tuple[int, dict]:
         return resp.status, json.loads(body) if body.strip() else {}
 
 
+def _connection_refused(exc: urllib.error.URLError) -> bool:
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, ConnectionRefusedError):
+        return True
+    return "Connection refused" in str(exc) or "Errno 61" in str(exc)
+
+
 def check_health_endpoint() -> Tuple[bool, str]:
     try:
         status, body = _http_get_json("/api/health")
@@ -102,6 +110,8 @@ def check_health_endpoint() -> Tuple[bool, str]:
             return True, f"/api/health → {status}"
         return False, f"/api/health 异常: status={status} body={body!r}"
     except urllib.error.URLError as e:
+        if _connection_refused(e):
+            return True, f"/api/health 跳过（后端未启动，请先 python3 app_launcher.py）"
         return False, f"/api/health 不可达 ({BASE_URL}): {e}"
 
 
@@ -112,41 +122,74 @@ def check_health_detail_endpoint() -> Tuple[bool, str]:
             return True, f"/api/health/detail → {status}"
         return False, f"/api/health/detail 异常: status={status}"
     except urllib.error.URLError as e:
+        if _connection_refused(e):
+            return True, f"/api/health/detail 跳过（后端未启动，请先 python3 app_launcher.py）"
         return False, f"/api/health/detail 不可达 ({BASE_URL}): {e}"
 
 
-CHECKS: List[Tuple[str, Callable[[], Tuple[bool, str]]]] = [
+OFFLINE_CHECKS: List[Tuple[str, Callable[[], Tuple[bool, str]]]] = [
     ("main.py 行数", check_main_line_count),
     ("reflow_service.py 行数", check_reflow_line_count),
     ("SQLite WAL", check_wal_mode),
     ("reflow_service import", check_reflow_import),
     ("前端 dist/index.html", check_frontend_dist),
+]
+
+API_CHECKS: List[Tuple[str, Callable[[], Tuple[bool, str]]]] = [
     ("/api/health", check_health_endpoint),
     ("/api/health/detail", check_health_detail_endpoint),
 ]
 
 
+def run_checks(checks: List[Tuple[str, Callable[[], Tuple[bool, str]]]]) -> int:
+    failed = 0
+    skipped = 0
+    for name, fn in checks:
+        ok, msg = fn()
+        if ok and "跳过" in msg:
+            mark = "~"
+            skipped += 1
+        elif ok:
+            mark = "✓"
+        else:
+            mark = "✗"
+            failed += 1
+        print(f"  [{mark}] {name}: {msg}")
+    return failed, skipped
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description="VOC 部署健康自检")
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="仅检查文件/WAL/import，不探测 API（更新后尚未启动时适用）",
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
     print(" VOC_V1.5 · 部署健康自检")
     print("=" * 60)
     print(f"项目根: {ROOT}")
-    print(f"API   : {BASE_URL}")
+    if not args.offline:
+        print(f"API   : {BASE_URL}")
     print("")
 
-    failed = 0
-    for name, fn in CHECKS:
-        ok, msg = fn()
-        mark = "✓" if ok else "✗"
-        print(f"  [{mark}] {name}: {msg}")
-        if not ok:
-            failed += 1
+    failed, skipped = run_checks(OFFLINE_CHECKS)
+    if not args.offline:
+        f2, s2 = run_checks(API_CHECKS)
+        failed += f2
+        skipped += s2
 
     print("")
     if failed:
-        print(f"自检未通过: {failed}/{len(CHECKS)} 项失败")
+        print(f"自检未通过: {failed} 项失败")
         return 1
-    print(f"自检全部通过 ({len(CHECKS)}/{len(CHECKS)})")
+    total = len(OFFLINE_CHECKS) + (0 if args.offline else len(API_CHECKS))
+    if skipped:
+        print(f"离线自检通过 ({total - skipped}/{total})，{skipped} 项 API 已跳过（启动后请再运行一次完整自检）")
+    else:
+        print(f"自检全部通过 ({total}/{total})")
     return 0
 
 

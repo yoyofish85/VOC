@@ -277,8 +277,8 @@ print_deploy_summary "$BACKUP_PATH"
 echo ""
 
 if [[ -f "$SCRIPT_DIR/deploy_checklist.py" ]]; then
-  echo "运行部署自检: python3 code_deploy/deploy_checklist.py"
-  python3 "$SCRIPT_DIR/deploy_checklist.py" || echo "  [警告] 部署自检未全部通过，请查看上方输出"
+  echo "运行部署自检（离线项，API 需启动后复查）: python3 code_deploy/deploy_checklist.py"
+  python3 "$SCRIPT_DIR/deploy_checklist.py" --offline || echo "  [警告] 部署自检未全部通过，请查看上方输出"
   echo ""
 fi
 
@@ -288,10 +288,19 @@ if [[ "${AUTO_START:-0}" == "1" ]]; then
   cd "$VOC_ROOT"
   nohup python3 app_launcher.py >>"$LOG" 2>&1 &
   echo "  PID: $!"
+  sleep 3
+  if [[ -f "$SCRIPT_DIR/deploy_checklist.py" ]]; then
+    echo "启动后 API 自检:"
+    python3 "$SCRIPT_DIR/deploy_checklist.py" || echo "  [警告] API 自检未通过"
+    echo ""
+  fi
 else
   echo "请手动启动系统："
   echo "  cd \"$VOC_ROOT\""
   echo "  python3 app_launcher.py"
+  echo ""
+  echo "启动后运行完整自检："
+  echo "  python3 code_deploy/deploy_checklist.py"
   echo ""
   echo "（后台启动可设置环境变量：AUTO_START=1 ./code_deploy/update_server.sh）"
 fi
