@@ -17,6 +17,7 @@ VOC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 CHECK_ONLY=0
 DO_ROLLBACK=0
+REPAIR_MD5=0
 ZIP=""
 
 usage() {
@@ -27,6 +28,7 @@ usage() {
 选项:
   --check-only   仅校验 MD5 与 zip 内依赖，不修改 src/
   --rollback     自动回滚到最近一次 src 备份
+  --repair-md5   根据当前 update.zip 重新生成 .md5（zip 可信、md5 过期时用）
   -h, --help     显示帮助
 EOF
 }
@@ -39,6 +41,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --rollback)
       DO_ROLLBACK=1
+      shift
+      ;;
+    --repair-md5)
+      REPAIR_MD5=1
       shift
       ;;
     -h | --help)
@@ -71,27 +77,58 @@ verify_md5() {
   local md5_path="${zip_path}.md5"
   if [[ ! -f "$md5_path" ]]; then
     echo "[错误] 未找到 MD5 校验文件: $md5_path"
+    echo "  提示: 须与 update.zip 成对拷贝（同一次 package_code.sh 产出）。"
     exit 1
   fi
-  local dir base
+  local dir base expected actual zip_bytes
   dir="$(cd "$(dirname "$zip_path")" && pwd)"
   base="$(basename "$zip_path")"
+  zip_bytes="$(stat -f%z "$zip_path" 2>/dev/null || stat -c%s "$zip_path" 2>/dev/null || echo "?")"
+  expected="$(awk '{print $1}' "$md5_path" | tr -d '\r\n')"
   echo "  → 校验 MD5: $md5_path"
+  echo "  → zip 大小: ${zip_bytes} 字节"
   if command -v md5sum >/dev/null 2>&1; then
-    (cd "$dir" && md5sum -c "${base}.md5") || {
-      echo "[错误] MD5 校验失败，中止部署。"
-      exit 1
-    }
-  else
-    local expected actual
-    expected="$(awk '{print $1}' "$md5_path")"
-    actual="$(md5 -q "$zip_path")"
-    if [[ "$expected" != "$actual" ]]; then
-      echo "[错误] MD5 不匹配: 期望 $expected，实际 $actual"
-      exit 1
+    actual="$(md5sum "$zip_path" | awk '{print $1}')"
+    if (cd "$dir" && md5sum -c "${base}.md5" >/dev/null 2>&1); then
+      echo "  [✓] MD5 校验通过 (md5sum)"
+      return 0
     fi
-    echo "  [✓] MD5 校验通过 (macOS md5)"
+  else
+    actual="$(md5 -q "$zip_path")"
+    if [[ "$expected" == "$actual" ]]; then
+      echo "  [✓] MD5 校验通过 (macOS md5)"
+      return 0
+    fi
   fi
+  echo "[错误] MD5 校验失败，中止部署。"
+  echo "  期望 MD5: $expected"
+  echo "  实际 MD5: ${actual:-（未计算）}"
+  echo ""
+  echo "常见原因:"
+  echo "  1. update.zip 与 update.zip.md5 不是同一次打包产出（须两个文件一起拷贝）"
+  echo "  2. 只更新了 zip，服务器上的 .md5 仍是旧版本"
+  echo "  3. 传输过程中 zip 损坏或不完整"
+  echo ""
+  echo "修复步骤:"
+  echo "  开发机: ./code_deploy/package_code.sh"
+  echo "  将 code_deploy/update.zip 与 code_deploy/update.zip.md5 成对拷到服务器"
+  echo "  若确认 zip 完整且仅 md5 过期: $0 --repair-md5"
+  exit 1
+}
+
+write_md5_for_zip() {
+  local zip_path="$1"
+  local md5_path="${zip_path}.md5"
+  local hash base
+  base="$(basename "$zip_path")"
+  if command -v md5sum >/dev/null 2>&1; then
+    hash="$(md5sum "$zip_path" | awk '{print $1}')"
+  else
+    hash="$(md5 -q "$zip_path")"
+  fi
+  printf '%s  %s\n' "$hash" "$base" >"$md5_path"
+  echo "  [✓] 已写入 $md5_path"
+  echo "  MD5: $hash"
 }
 
 archive_md5() {
@@ -184,6 +221,14 @@ if [[ ! -f "$ZIP" ]]; then
   echo "[错误] 未找到更新包: $ZIP"
   echo "请将开发机生成的 update.zip 放到 code_deploy/ 下或传入绝对路径。"
   exit 1
+fi
+
+if [[ "$REPAIR_MD5" == "1" ]]; then
+  echo "[repair-md5] 根据当前 zip 重新生成 MD5..."
+  write_md5_for_zip "$ZIP"
+  echo ""
+  echo "请再次运行: $0 --check-only"
+  exit 0
 fi
 
 if [[ ! -d "$VOC_ROOT/src/backend" ]]; then

@@ -23,13 +23,14 @@ trap cleanup EXIT
 write_md5_file() {
   local zip_path="$1"
   local md5_path="$2"
-  local hash=""
+  local hash base
+  base="$(basename "$zip_path")"
   if command -v md5sum >/dev/null 2>&1; then
     hash="$(md5sum "$zip_path" | awk '{print $1}')"
   else
     hash="$(md5 -q "$zip_path")"
   fi
-  echo "$hash  $(basename "$zip_path")" >"$md5_path"
+  printf '%s  %s\n' "$hash" "$base" >"$md5_path"
 }
 
 echo "============================================================"
@@ -205,7 +206,9 @@ echo "============================================================"
 echo "deploy tag : $DEPLOY_TAG"
 echo "输出文件   : $OUT_ZIP"
 echo "MD5 校验   : $OUT_MD5"
+echo "zip MD5    : $(awk '{print $1}' "$OUT_MD5")"
 echo ""
+echo "⚠️  请将 update.zip 与 update.zip.md5 成对拷贝到服务器（同一次打包，缺一不可）。"
 echo "请将 update.zip 与 update.zip.md5 离线拷贝到服务器，然后执行："
 echo "  ./code_deploy/update_server.sh"
 echo ""
