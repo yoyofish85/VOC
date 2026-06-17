@@ -98,6 +98,13 @@ export const getYearlySummaryApi = (params) => request.get('/get_yearly_summary'
 
 export const confirmReviewApi = (data) => request.post('/confirm_review', data, { timeout: 120000 });
 
+/** 整批确认：对某导入批次内全部已可确认的行一次性确认（不受分页 20 条限制） */
+export const confirmReviewBatchApi = (data) => request.post('/confirm_review_batch', data, { timeout: 180000 });
+
+/** 整批确认前预览：返回未就绪条目 */
+export const confirmReviewBatchPreviewApi = (params) =>
+  request.get('/confirm_review_batch/preview', { params, timeout: 60000 });
+
 export const previewKeywordsApi = (data) => request.post('/api/preview_keywords', data);
 
 export const getVisualData = () => request.get('/get_visual_data');

@@ -54,6 +54,7 @@ if _LABEL_PROJECT_STR not in sys.path:
 from taxonomy_normalize import (  # noqa: E402
     CANONICAL_L1_LABELS,
     L2_EVAL_L1,
+    NON_ISSUE_L1,
     canonicalize_l1_label,
     l1_values_for_filter,
     strip_non_issue_l2,
@@ -93,6 +94,8 @@ CLASSIFY_ASYNC_MIN_ROWS = int(os.environ.get("VOC_CLASSIFY_ASYNC_MIN_ROWS", "10"
 classify_jobs: Dict[str, dict] = {}
 classify_jobs_lock = threading.Lock()
 _CLASSIFY_JOBS_MAX = 200
+# 串行化年度 CSV 全量重写，避免多次确认并发写同一文件互相覆盖。
+_YEARLY_CSV_LOCK = threading.Lock()
 REVIEW_LIST_MAX_PAGE = int(os.environ.get("VOC_REVIEW_LIST_MAX_PAGE", "20"))
 REVIEW_LIST_DEFAULT_PAGE = int(os.environ.get("VOC_REVIEW_LIST_DEFAULT_PAGE", "20"))
 REVIEW_LIST_QUERY_TIMEOUT = float(os.environ.get("VOC_REVIEW_LIST_QUERY_TIMEOUT", "45"))
@@ -817,23 +820,41 @@ def _reflow_rows_background(
     reviewer: str,
     trigger: str,
     also_yearly: bool = False,
+    *,
+    write_csv: bool = False,
+    upload_batch: Optional[str] = None,
 ) -> None:
+    """后台回流：
+    - rows 非空时回流清洗库并将这些行 reflow_synced 标 1；
+    - write_csv=True 时（确认复核路径）总是按"全部已复核行"重写年度 CSV，
+      确保部分复核的数据也即时落盘存档（不仅是整批完成时）；
+    - also_yearly 且该导入批次已全部复核时，升级为 reflow_synced=2 并刷新金标。
+    """
     def runner():
         try:
-            from reflow_service import reflow_batch_rows
+            if rows:
+                from reflow_service import reflow_batch_rows
 
-            reflow_batch_rows(rows, keyword_extractor, reviewer=reviewer, trigger=trigger)
-            for row in rows:
-                execute_db(
-                    "UPDATE opinion SET reflow_synced = 1 WHERE opinion_id = ?",
-                    [row["opinion_id"]],
-                )
-            _refresh_label_matcher_gold_cache()
+                reflow_batch_rows(rows, keyword_extractor, reviewer=reviewer, trigger=trigger)
+                for row in rows:
+                    execute_db(
+                        "UPDATE opinion SET reflow_synced = 1 WHERE opinion_id = ?",
+                        [row["opinion_id"]],
+                    )
+                _refresh_label_matcher_gold_cache()
+
+            if write_csv:
+                try:
+                    with _YEARLY_CSV_LOCK:
+                        _write_yearly_csv_to_disk()
+                except Exception:
+                    logger.exception("background annual CSV write failed trigger=%s", trigger)
+
             if also_yearly:
                 batches = list({str(r.get("upload_batch") or "") for r in rows if r.get("upload_batch")})
                 batches = [b for b in batches if b]
-                if len(batches) == 1:
-                    ub = batches[0]
+                ub = upload_batch or (batches[0] if len(batches) == 1 else "")
+                if ub:
                     pend = query_db(
                         "SELECT COUNT(*) as cnt FROM opinion WHERE upload_batch = ? AND review_status != 1",
                         [ub],
@@ -842,7 +863,8 @@ def _reflow_rows_background(
                     pc = int(pend["cnt"] or 0) if pend else 0
                     if pc == 0:
                         try:
-                            _apply_yearly_archive_for_batch(ub, reviewer)
+                            with _YEARLY_CSV_LOCK:
+                                _apply_yearly_archive_for_batch(ub, reviewer)
                         except Exception:
                             logger.exception("background yearly archive failed batch=%s", ub)
         except Exception as e:
@@ -1506,6 +1528,7 @@ async def get_review_list_api(
     pendingOnly: bool = False,
     filterSource: str = "",
     mismatchFilter: str = "",
+    opinionIds: str = "",
 ):
     try:
         page = max(1, int(page or 1))
@@ -1523,6 +1546,12 @@ async def get_review_list_api(
     if uploadBatch:
         where_conditions.append("upload_batch = ?")
         params.append(uploadBatch)
+    if opinionIds:
+        id_list = [x.strip() for x in str(opinionIds).split(",") if x.strip()][:500]
+        if id_list:
+            ph = ",".join(["?"] * len(id_list))
+            where_conditions.append(f"opinion_id IN ({ph})")
+            params.extend(id_list)
     if filterSource:
         where_conditions.append("source LIKE ?")
         params.append(f"%{filterSource}%")
@@ -2570,6 +2599,95 @@ async def get_reflow_failures_api(limit: int = 50):
     return {"code": 200, "msg": "ok", "data": _read_reflow_failures(cap)}
 
 
+def _write_confirm_reviews(
+    reviews: List[dict],
+    reviewer: str,
+    with_reflow: bool,
+    *,
+    chunk: int = 100,
+) -> Tuple[List[dict], int]:
+    """确认复核核心：分块短事务写库，返回 (需回流的行, 实际确认条数)。
+
+    分块提交（每 chunk 条一次事务）避免一次性大事务长时间持有写锁，
+    使整批（200-300 条）确认能与 14B 分类等其他写操作并存。
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    rows_for_reflow: List[dict] = []
+    confirmed = 0
+    items = [it for it in reviews if it and it.get("opinion_id")]
+    step = max(1, int(chunk))
+    for start in range(0, len(items), step):
+        part = items[start : start + step]
+        conn = sqlite3.connect(DB_PATH, timeout=60)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        try:
+            cur.execute("PRAGMA busy_timeout=60000")
+            cur.execute("BEGIN IMMEDIATE")
+            for item in part:
+                oid = item.get("opinion_id")
+                if not oid:
+                    continue
+                cur.execute("SELECT * FROM opinion WHERE opinion_id = ?", [oid])
+                row = cur.fetchone()
+                if not row:
+                    continue
+                base = dict(row)
+                v3_raw = base.get("v3_label_meta") or ""
+                auto_l1, auto_l2 = "", ""
+                try:
+                    if v3_raw:
+                        mj = json.loads(v3_raw) if isinstance(v3_raw, str) else {}
+                        auto_l1 = str(mj.get("l1") or "")
+                        auto_l2 = str(mj.get("l2") or "")
+                except Exception:
+                    pass
+                raw_l1 = (item.get("review_l1") or base.get("review_l1") or auto_l1 or "").strip()
+                if not raw_l1:
+                    continue
+                l1, l2 = _normalize_review_labels(
+                    raw_l1,
+                    item.get("review_l2") or base.get("review_l2") or auto_l2 or "",
+                )
+                note = item.get("review_note")
+                if note is None:
+                    note = base.get("review_note")
+                text = base.get("original_text") or ""
+                kws = keyword_extractor.extract_keywords(text)[:35]
+                extracted = ",".join(kws)
+                existing_l1 = (base.get("review_l1") or "").strip()
+                existing_l2 = (base.get("review_l2") or "").strip()
+                existing_reflow = int(base.get("reflow_synced") or 0)
+                labels_changed = (l1 != existing_l1) or (l2 != existing_l2)
+                reflow_synced_val = 0 if labels_changed else existing_reflow
+                cur.execute(
+                    """UPDATE opinion SET review_status=1, review_l1=?, review_l2=?, review_note=?,
+                    extracted_keywords=?, reviewer=?, reviewed_at=?, review_l3='', reflow_synced=?
+                    WHERE opinion_id=?""",
+                    [l1, l2, note, extracted, reviewer or None, now, reflow_synced_val, oid],
+                )
+                confirmed += 1
+                if with_reflow and labels_changed:
+                    rows_for_reflow.append(
+                        {
+                            **base,
+                            "review_l1": l1,
+                            "review_l2": l2,
+                            "review_note": note,
+                            "extracted_keywords": extracted,
+                            "reviewer": reviewer,
+                            "reviewed_at": now,
+                        }
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            conn.close()
+            raise
+        conn.close()
+    return rows_for_reflow, confirmed
+
+
 @app.post("/api/confirm_review")
 @app.post("/confirm_review")
 async def confirm_review_api(request: Request):
@@ -2581,73 +2699,11 @@ async def confirm_review_api(request: Request):
     reviewer = (data.get("reviewer") or "").strip()
     with_reflow = data.get("with_reflow", True)
     also_yearly = bool(data.get("also_yearly", False))
-    now = datetime.now().isoformat(timespec="seconds")
-    rows_for_reflow: List[dict] = []
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
     try:
-        cur.execute("BEGIN IMMEDIATE")
-        for item in reviews:
-            oid = item.get("opinion_id")
-            if not oid:
-                continue
-            cur.execute("SELECT * FROM opinion WHERE opinion_id = ?", [oid])
-            row = cur.fetchone()
-            if not row:
-                continue
-            base = dict(row)
-            v3_raw = base.get("v3_label_meta") or ""
-            auto_l1, auto_l2 = "", ""
-            try:
-                if v3_raw:
-                    mj = json.loads(v3_raw) if isinstance(v3_raw, str) else {}
-                    auto_l1 = str(mj.get("l1") or "")
-                    auto_l2 = str(mj.get("l2") or "")
-            except Exception:
-                pass
-            raw_l1 = (item.get("review_l1") or base.get("review_l1") or auto_l1 or "").strip()
-            if not raw_l1:
-                continue
-            l1, l2 = _normalize_review_labels(
-                raw_l1,
-                item.get("review_l2") or base.get("review_l2") or auto_l2 or "",
-            )
-            note = item.get("review_note")
-            if note is None:
-                note = base.get("review_note")
-            text = base.get("original_text") or ""
-            kws = keyword_extractor.extract_keywords(text)[:35]
-            extracted = ",".join(kws)
-            existing_l1 = (base.get("review_l1") or "").strip()
-            existing_l2 = (base.get("review_l2") or "").strip()
-            existing_reflow = int(base.get("reflow_synced") or 0)
-            labels_changed = (l1 != existing_l1) or (l2 != existing_l2)
-            reflow_synced_val = 0 if labels_changed else existing_reflow
-            cur.execute(
-                """UPDATE opinion SET review_status=1, review_l1=?, review_l2=?, review_note=?,
-                extracted_keywords=?, reviewer=?, reviewed_at=?, review_l3='', reflow_synced=?
-                WHERE opinion_id=?""",
-                [l1, l2, note, extracted, reviewer or None, now, reflow_synced_val, oid],
-            )
-            if with_reflow and labels_changed:
-                merged = {
-                    **base,
-                    "review_l1": l1,
-                    "review_l2": l2,
-                    "review_note": note,
-                    "extracted_keywords": extracted,
-                    "reviewer": reviewer,
-                    "reviewed_at": now,
-                }
-                rows_for_reflow.append(merged)
-        conn.commit()
+        rows_for_reflow, _confirmed = _write_confirm_reviews(reviews, reviewer, with_reflow)
     except Exception as e:
-        conn.rollback()
-        conn.close()
         logger.exception("confirm_review 事务失败: %s", e)
         return {"code": 500, "msg": f"复核保存失败：{e}"}
-    conn.close()
 
     reflowed = new_c = over_c = 0
     reflow_async = False
@@ -2655,7 +2711,9 @@ async def confirm_review_api(request: Request):
     yearly_data: Dict[str, Any] = {}
     if with_reflow and rows_for_reflow:
         reflow_async = True
-        _reflow_rows_background(rows_for_reflow, reviewer, "confirm", also_yearly=also_yearly)
+        _reflow_rows_background(
+            rows_for_reflow, reviewer, "confirm", also_yearly=also_yearly, write_csv=True
+        )
         msg = (
             f"复核成功，共 {len(rows_for_reflow)} 条；清洗库与金标回流已在后台执行，"
             "完成后将更新 reflow_synced；关键词已写入舆情库。"
@@ -2699,6 +2757,198 @@ async def confirm_review_api(request: Request):
     }
     out.update(yearly_data)
     return out
+
+
+def _effective_review_labels_from_row(row: dict) -> Tuple[str, str]:
+    """从人工复核字段或 v3_label_meta 解析有效一二级（用于整批确认就绪判定）。"""
+    rl1 = str(row.get("review_l1") or "").strip()
+    rl2 = str(row.get("review_l2") or "").strip()
+    if not rl1:
+        v3_raw = row.get("v3_label_meta") or ""
+        try:
+            if v3_raw:
+                mj = json.loads(v3_raw) if isinstance(v3_raw, str) else {}
+                rl1 = str(mj.get("l1") or "").strip()
+                if not rl2:
+                    rl2 = str(mj.get("l2") or "").strip()
+        except Exception:
+            pass
+    return rl1, rl2
+
+
+def _batch_confirm_block_reason(l1: str, l2: str) -> Optional[str]:
+    """未就绪原因：缺一级 / 业务类缺二级；None 表示可确认。"""
+    if not l1:
+        return "no_l1"
+    l1c = canonicalize_l1_label(l1)
+    if l1c and l1c != NON_ISSUE_L1 and not (l2 or "").strip():
+        return "missing_l2"
+    return None
+
+
+_BATCH_CONFIRM_REASON_TEXT = {
+    "no_l1": "缺一级标签（需先 14B 分类或人工填写）",
+    "missing_l2": "缺二级标签（业务类须填写人工二级）",
+}
+
+
+def _batch_confirm_readiness(upload_batch: str) -> Dict[str, Any]:
+    """分析导入批次整批确认就绪情况。"""
+    rows = query_db(
+        """SELECT opinion_id, original_text, review_l1, review_l2, review_note,
+           v3_label_meta, review_status FROM opinion WHERE upload_batch = ?""",
+        [upload_batch],
+    )
+    confirmable: List[dict] = []
+    unreviewed: List[dict] = []
+    already_confirmed = 0
+    for r in rows:
+        oid = str(r.get("opinion_id") or "").strip()
+        if not oid:
+            continue
+        rs = int(r.get("review_status") or 0)
+        if rs == 1:
+            already_confirmed += 1
+            continue
+        l1, l2 = _effective_review_labels_from_row(r)
+        reason = _batch_confirm_block_reason(l1, l2)
+        if reason:
+            unreviewed.append(
+                {
+                    "opinion_id": oid,
+                    "review_status": rs,
+                    "reason": reason,
+                    "reason_text": _BATCH_CONFIRM_REASON_TEXT.get(reason, reason),
+                    "original_text_preview": str(r.get("original_text") or "")[:120],
+                }
+            )
+            continue
+        l1n, l2n = _normalize_review_labels(l1, l2)
+        confirmable.append(
+            {
+                "opinion_id": oid,
+                "review_l1": l1n,
+                "review_l2": l2n,
+                "review_note": r.get("review_note"),
+            }
+        )
+    return {
+        "upload_batch": upload_batch,
+        "total": len(rows),
+        "confirmable_count": len(confirmable),
+        "unreviewed_count": len(unreviewed),
+        "already_confirmed_count": already_confirmed,
+        "confirmable": confirmable,
+        "unreviewed": unreviewed,
+    }
+
+
+def _collect_batch_reviews(upload_batch: str) -> Tuple[List[dict], int, int]:
+    """收集某导入批次内所有"已可确认"的行。返回 (reviews, 可确认条数, 未就绪条数)。"""
+    info = _batch_confirm_readiness(upload_batch)
+    return info["confirmable"], info["confirmable_count"], info["unreviewed_count"]
+
+
+@app.get("/api/confirm_review_batch/preview")
+@app.get("/confirm_review_batch/preview")
+async def confirm_review_batch_preview_api(upload_batch: str = ""):
+    """整批确认前预览：返回未就绪（不可确认）条目，供前端提示并筛选列表。"""
+    ub = str(upload_batch or "").strip()
+    if not ub:
+        return {"code": 400, "msg": "需要 upload_batch"}
+    info = _batch_confirm_readiness(ub)
+    ready = info["unreviewed_count"] == 0 and info["confirmable_count"] > 0
+    all_done = info["unreviewed_count"] == 0 and info["confirmable_count"] == 0
+    msg = "可以整批确认"
+    if info["unreviewed_count"] > 0:
+        msg = f"尚有 {info['unreviewed_count']} 条未就绪，请先完成分类或填写标签"
+    elif all_done:
+        msg = "该批次已全部复核完成"
+    return {
+        "code": 200,
+        "msg": msg,
+        "ready": ready,
+        "all_done": all_done,
+        **{k: info[k] for k in (
+            "upload_batch", "total", "confirmable_count", "unreviewed_count",
+            "already_confirmed_count", "unreviewed",
+        )},
+    }
+
+
+@app.post("/api/confirm_review_batch")
+@app.post("/confirm_review_batch")
+async def confirm_review_batch_api(request: Request):
+    """整批确认：对某导入批次内所有已可确认（已填或可回退到 v3 自动标签）的行一次性确认，
+    不受复核表分页（≤20 条）限制；确认后回流并即时写入年度 CSV（部分复核也存档）。"""
+    data = await request.json()
+    upload_batch = str(data.get("upload_batch") or "").strip()
+    reviewer = (data.get("reviewer") or "").strip()
+    with_reflow = bool(data.get("with_reflow", True))
+    also_yearly = bool(data.get("also_yearly", True))
+    if not upload_batch:
+        return {"code": 400, "msg": "需要 upload_batch"}
+
+    readiness = _batch_confirm_readiness(upload_batch)
+    reviews = readiness["confirmable"]
+    unreviewed_count = readiness["unreviewed_count"]
+    if unreviewed_count > 0:
+        return {
+            "code": 409,
+            "msg": (
+                f"该批次尚有 {unreviewed_count} 条未就绪（缺标签或未填二级），"
+                "请先完成分类/人工填写后再整批确认。"
+            ),
+            "confirmed": 0,
+            "unreviewed_count": unreviewed_count,
+            "unreviewed": readiness["unreviewed"],
+            "confirmable_count": readiness["confirmable_count"],
+            "already_confirmed_count": readiness["already_confirmed_count"],
+        }
+    if not reviews:
+        return {
+            "code": 200,
+            "msg": "该批次已全部复核完成，无需重复确认。",
+            "confirmed": 0,
+            "skipped_no_label": 0,
+            "already_confirmed_count": readiness["already_confirmed_count"],
+        }
+
+    try:
+        rows_for_reflow, confirmed = await asyncio.to_thread(
+            _write_confirm_reviews, reviews, reviewer, with_reflow
+        )
+    except Exception as e:
+        logger.exception("confirm_review_batch 事务失败: %s", e)
+        return {"code": 500, "msg": f"整批确认保存失败：{e}"}
+
+    reflow_async = False
+    if with_reflow:
+        # 即使本次没有"标签变更"的回流行（全部此前已回流），也要触发后台写年度 CSV，
+        # 并在整批复核完成时升级 reflow_synced=2，确保数据完整存档。
+        reflow_async = True
+        _reflow_rows_background(
+            rows_for_reflow,
+            reviewer,
+            "confirm_batch",
+            also_yearly=also_yearly,
+            write_csv=True,
+            upload_batch=upload_batch,
+        )
+        msg = f"已整批确认 {confirmed} 条；清洗库回流与年度 CSV 写入已在后台执行，请稍后刷新查看 reflow_synced 状态。"
+    else:
+        msg = f"已整批确认 {confirmed} 条（未回流）。"
+
+    return {
+        "code": 200,
+        "msg": msg,
+        "confirmed": confirmed,
+        "skipped_no_label": 0,
+        "unreviewed_count": 0,
+        "reflow_pending": len(rows_for_reflow),
+        "reflow_async": reflow_async,
+        "already_confirmed_count": readiness["already_confirmed_count"],
+    }
 
 
 @app.post("/api/preview_keywords")

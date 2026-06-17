@@ -177,11 +177,19 @@
         type="primary"
         size="large"
         class="btn-confirm-archive"
+        :disabled="!selectedBatch"
+        :loading="batchConfirmLoading"
+        @click="confirmWholeBatch"
+      >
+        确认整批 + 归档年度数据
+      </el-button>
+      <el-button
+        plain
         :disabled="!selectedRows.length"
         :loading="batchConfirmLoading"
         @click="batchConfirmReview"
       >
-        确认复核 + 归档年度数据
+        仅确认所选 ({{ selectedRows.length }})
       </el-button>
       <el-button
         type="info"
@@ -199,9 +207,30 @@
       </el-button>
       <el-button :disabled="!selectedBatch" @click="exportCsv">导出当前批次 CSV</el-button>
       <span class="batch-hint"
-        >已选 {{ selectedRows.length }} 条 · 表格内修改将自动保存 · 「确认复核 + 归档年度数据」将：确认所选并回流清洗库；若本导入批次已全部复核，则同步归档年度 CSV（已归档条目自动跳过重复加权）</span
+        >「确认整批 + 归档年度数据」将确认本导入批次内<strong>全部</strong>已分类/已填标签的反馈（不受当前页 20 条限制），回流清洗库并即时写入年度 CSV；批次全部复核完成后自动升级归档标记。「仅确认所选」只处理勾选行。</span
       >
     </div>
+
+    <el-alert
+      v-if="batchUnreviewedHint"
+      type="error"
+      show-icon
+      closable
+      class="list-hint-alert batch-unreviewed-alert"
+      @close="clearBatchUnreviewedFilter"
+    >
+      <div>{{ batchUnreviewedHint }}</div>
+      <div v-if="batchUnreviewedItems.length" class="batch-unreviewed-detail">
+        <div v-for="item in batchUnreviewedItems.slice(0, 8)" :key="item.opinion_id" class="batch-unreviewed-line">
+          <strong>{{ item.opinion_id }}</strong> · {{ item.reason_text }}
+          <span v-if="item.original_text_preview" class="muted"> — {{ item.original_text_preview }}</span>
+        </div>
+        <div v-if="batchUnreviewedItems.length > 8" class="muted">
+          另有 {{ batchUnreviewedItems.length - 8 }} 条未列出，已在下方表格筛选显示。
+        </div>
+      </div>
+      <el-button link type="primary" size="small" class="mt4" @click="clearBatchUnreviewedFilter">清除筛选</el-button>
+    </el-alert>
 
     <el-alert
       v-if="listErrorHint"
@@ -457,6 +486,8 @@ import {
   getTaxonomyOptionsApi,
   exportReviewsCsvApi,
   confirmReviewApi,
+  confirmReviewBatchApi,
+  confirmReviewBatchPreviewApi,
   previewKeywordsApi,
   listAnnualCsvApi,
   getL2ByL1Api
@@ -603,6 +634,10 @@ const startClassifyJobPoll = (jobId) => {
 const reviewList = ref([])
 const loading = ref(false)
 const listErrorHint = ref('')
+/** 整批确认拦截：未就绪条目提示与列表筛选 */
+const batchUnreviewedHint = ref('')
+const batchUnreviewedItems = ref([])
+const batchUnreviewedIdSet = ref(new Set())
 const selectedRows = ref([])
 const batchList = ref([])
 const yearlySummaryList = ref([])
@@ -1030,6 +1065,9 @@ const buildParams = () => {
     p.dateFrom = dateRange.value[0]
     p.dateTo = dateRange.value[1]
   }
+  if (batchUnreviewedIdSet.value.size) {
+    p.opinionIds = [...batchUnreviewedIdSet.value].join(',')
+  }
   Object.keys(p).forEach((k) => {
     if (p[k] === undefined || p[k] === '') delete p[k]
   })
@@ -1181,7 +1219,34 @@ const getReviewList = async () => {
   }
 }
 
+const clearBatchUnreviewedState = () => {
+  batchUnreviewedHint.value = ''
+  batchUnreviewedItems.value = []
+  batchUnreviewedIdSet.value = new Set()
+}
+
+const clearBatchUnreviewedFilter = () => {
+  clearBatchUnreviewedState()
+  page.value = 1
+  getReviewList()
+}
+
+const showBatchUnreviewedInList = (preview) => {
+  const items = preview?.unreviewed || []
+  batchUnreviewedItems.value = items
+  batchUnreviewedIdSet.value = new Set(items.map((x) => x.opinion_id).filter(Boolean))
+  const noL1 = items.filter((x) => x.reason === 'no_l1').length
+  const missL2 = items.filter((x) => x.reason === 'missing_l2').length
+  const parts = []
+  if (noL1) parts.push(`${noL1} 条缺一级`)
+  if (missL2) parts.push(`${missL2} 条缺二级`)
+  batchUnreviewedHint.value = `整批确认已暂停：本批次尚有 ${items.length} 条未就绪（${parts.join('，')}）。请先在下方列表补全标签后再试。`
+  page.value = 1
+  getReviewList()
+}
+
 const resetFilters = () => {
+  clearBatchUnreviewedState()
   searchKey.value = ''
   reviewStatus.value = ''
   filterL1.value = ''
@@ -1392,6 +1457,7 @@ const tableRowClassName = ({ row }) => {
   if (row.review_status === 1) cls.push('row-done')
   else if (row.review_status === 2) cls.push('row-doubt')
   if (row.review_status !== 1 && conf != null && conf < 0.52) cls.push('row-lowconf')
+  if (batchUnreviewedIdSet.value.has(row.opinion_id)) cls.push('row-batch-blocked')
   return cls.join(' ')
 }
 
@@ -1417,6 +1483,79 @@ const batchSaveReviews = async () => {
     } else ElMessage.error(res.msg || '失败')
   } catch {
     ElMessage.error('保存失败')
+  }
+}
+
+const confirmWholeBatch = async () => {
+  if (!selectedBatch.value) {
+    ElMessage.warning('请先选择导入批次')
+    return
+  }
+  await flushPendingRowSaves()
+  batchConfirmLoading.value = true
+  try {
+    const preview = await confirmReviewBatchPreviewApi({ upload_batch: selectedBatch.value })
+    if (preview.code !== 200) {
+      ElMessage.error(preview.msg || '无法预览批次状态')
+      return
+    }
+    if (preview.unreviewed_count > 0) {
+      showBatchUnreviewedInList(preview)
+      await ElMessageBox.alert(
+        `批次「${selectedBatch.value}」尚有 ${preview.unreviewed_count} 条未就绪，无法整批确认。\n\n` +
+          `可确认：${preview.confirmable_count} 条 · 已复核：${preview.already_confirmed_count} 条\n\n` +
+          '未就绪条目已在下方详情列表筛选显示，请补全一级/二级标签后重试。',
+        '存在未复核/未就绪条目',
+        { type: 'warning', confirmButtonText: '我知道了' }
+      )
+      return
+    }
+    if (preview.all_done) {
+      ElMessage.info(preview.msg || '该批次已全部复核完成')
+      return
+    }
+    if (!preview.confirmable_count) {
+      ElMessage.warning('该批次没有可确认的条目')
+      return
+    }
+    try {
+      await ElMessageBox.confirm(
+        `将对批次「${selectedBatch.value}」内 ${preview.confirmable_count} 条待确认反馈执行整批复核、回流清洗库并写入年度 CSV。是否继续？`,
+        '确认整批 + 归档',
+        { type: 'warning', confirmButtonText: '确认整批', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+    ElMessage.info('正在整批确认、回流并写入年度数据…')
+    const res = await confirmReviewBatchApi({
+      upload_batch: selectedBatch.value,
+      reviewer: reviewerName.value,
+      with_reflow: true,
+      also_yearly: true
+    })
+    if (res.code === 200) {
+      clearBatchUnreviewedFilter()
+      ElNotification({
+        title: '整批确认与归档',
+        message: res.msg || `已整批确认 ${res.confirmed ?? 0} 条`,
+        type: 'success',
+        duration: 7000
+      })
+      selectedRows.value = []
+      await getReviewList()
+      getYearlySummary()
+      emit('refresh')
+    } else if (res.code === 409 && res.unreviewed?.length) {
+      showBatchUnreviewedInList(res)
+      ElMessage.warning(res.msg || '存在未就绪条目，已暂停整批确认')
+    } else {
+      ElMessage.error(res.msg || '整批确认失败')
+    }
+  } catch {
+    ElMessage.error('请求失败')
+  } finally {
+    batchConfirmLoading.value = false
   }
 }
 
@@ -2078,6 +2217,28 @@ onUnmounted(() => {
 :deep(.row-lowconf) {
   box-shadow: inset 3px 0 0 #e6a23c;
   background: #fffaf0 !important;
+}
+:deep(.row-batch-blocked) {
+  box-shadow: inset 3px 0 0 #f56c6c;
+  background: #fef0f0 !important;
+}
+.batch-unreviewed-alert {
+  margin-bottom: 10px;
+}
+.batch-unreviewed-detail {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.batch-unreviewed-line {
+  margin-top: 4px;
+}
+.batch-unreviewed-line .muted,
+.batch-unreviewed-detail .muted {
+  color: #909399;
+}
+.mt4 {
+  margin-top: 4px;
 }
 :deep(.kw-hl) {
   color: #b88230;

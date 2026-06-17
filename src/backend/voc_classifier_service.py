@@ -235,6 +235,8 @@ def run_batch_classify(
         conn.close()
         return {"code": 400, "msg": "需要 upload_batch 或 opinion_ids", "updated": 0}
     rows = c.fetchall()
+    # 读完即关连接：分类期间（数十分钟）不持有任何连接/写锁，避免阻塞复核确认、回流等并发写。
+    conn.close()
     total = len(rows)
     started_at = time.time()
     metrics_collector = ClassifyMetricsCollector()
@@ -246,6 +248,50 @@ def run_batch_classify(
     # 14B：每批 8 条后批次间休眠 500ms（可环境变量覆盖），降低 Ollama 瞬时负载
     batch_sz = max(1, min(20, int(os.environ.get("VOC_QWEN_BATCH_SIZE", "8"))))
     inter_batch_sleep = float(os.environ.get("VOC_QWEN_INTER_BATCH_SLEEP", "0.5"))
+
+    # 分批短事务提交：分类结果先缓冲，每 commit_every 条用一次性短连接写库并提交，
+    # 写锁仅在毫秒级的 executemany 期间持有（不跨越慢速 Ollama 调用），避免长事务饿死其他写操作。
+    commit_every = max(1, int(os.environ.get("VOC_QWEN_COMMIT_EVERY", "10")))
+    checkpoint_every = max(0, int(os.environ.get("VOC_QWEN_CHECKPOINT_EVERY", "5")))
+    pending_writes: List[tuple] = []
+    flush_state = {"count": 0}
+    update_sql = (
+        "UPDATE opinion SET v3_label_meta = ?, match_score = ?, "
+        "v3_l1 = ?, v3_l2 = ?, v3_l3 = ?, v3_confidence = ?, v3_match_type = ?, "
+        "review_status = CASE WHEN review_status = 1 THEN 1 "
+        "ELSE (CASE WHEN ? = 1 THEN 2 WHEN ? < ? THEN 2 ELSE 0 END) END WHERE id = ?"
+    )
+
+    def _flush_writes() -> None:
+        if not pending_writes:
+            return
+        last_err: Optional[Exception] = None
+        for attempt in range(3):
+            wconn = sqlite3.connect(db_path, timeout=60)
+            try:
+                wconn.execute("PRAGMA busy_timeout=60000")
+                wconn.executemany(update_sql, pending_writes)
+                wconn.commit()
+                flush_state["count"] += 1
+                if checkpoint_every and (flush_state["count"] % checkpoint_every == 0):
+                    try:
+                        wconn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    except Exception:
+                        pass
+                pending_writes.clear()
+                return
+            except Exception as e:
+                last_err = e
+                try:
+                    wconn.rollback()
+                except Exception:
+                    pass
+                logger.warning("分类结果落库重试 attempt=%d: %s", attempt + 1, e)
+                time.sleep(0.5 * (attempt + 1))
+            finally:
+                wconn.close()
+        assert last_err is not None
+        raise last_err
 
     for idx, row in enumerate(rows, start=1):
         oid = row["opinion_id"]
@@ -385,11 +431,7 @@ def run_batch_classify(
             v3_json = json.dumps(meta, ensure_ascii=False)
             force_i = 1 if force_pending else 0
             v3_l1, v3_l2, v3_l3, v3_conf, v3_mt = materialized_update_params(meta)
-            c.execute(
-                """UPDATE opinion SET v3_label_meta = ?, match_score = ?,
-                v3_l1 = ?, v3_l2 = ?, v3_l3 = ?, v3_confidence = ?, v3_match_type = ?,
-                review_status = CASE WHEN review_status = 1 THEN 1
-                ELSE (CASE WHEN ? = 1 THEN 2 WHEN ? < ? THEN 2 ELSE 0 END) END WHERE id = ?""",
+            pending_writes.append(
                 (
                     v3_json,
                     conf,
@@ -402,7 +444,7 @@ def run_batch_classify(
                     conf,
                     low_confidence_threshold,
                     row["id"],
-                ),
+                )
             )
             metrics_collector.record_row(
                 meta,
@@ -418,13 +460,15 @@ def run_batch_classify(
             metrics_collector.record_error()
         if progress_cb:
             progress_cb(idx, total, f"正在分类 {idx}/{total}")
+        # 达到提交阈值即落库（短事务），随后再节流；保证断点结果持久、写锁尽快释放。
+        if len(pending_writes) >= commit_every:
+            _flush_writes()
         if use_qwen14:
             # 14B 本地推理串行节流；按批稍作停顿，避免 M3 Max 上请求堆积。
             time.sleep(float(os.environ.get("VOC_QWEN_BATCH_SLEEP", "0.15")))
             if idx % batch_sz == 0 and idx < total:
                 time.sleep(inter_batch_sleep)
-    conn.commit()
-    conn.close()
+    _flush_writes()
     route_metrics = finalize_classify_metrics(
         metrics_collector,
         upload_batch=upload_batch,
