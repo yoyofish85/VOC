@@ -2264,13 +2264,145 @@ def build_classify_prompt(text: str, l2_map: Dict[str, List[str]], examples: Lis
     )
 
 
-def summarize_opinions(rows: List[Dict[str, Any]], *, period: str, region: str, model: str = QWEN_MODEL, host: str = QWEN_HOST) -> Dict[str, Any]:
+def _row_l2_label(row: Dict[str, Any]) -> str:
+    return str(row.get("review_l2") or row.get("model_keyword") or "").split(",", 1)[0].strip()
+
+
+def _pick_representative_quotes(rows: List[Dict[str, Any]], top_n: int = 4) -> List[Dict[str, Any]]:
+    """从 rows 中选出最具代表性的 3-4 条原文（脱敏后供汇报引用）。"""
+    from collections import defaultdict
+
+    l2_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        l2 = _row_l2_label(r)
+        if l2:
+            l2_groups[l2].append(r)
+
+    top_l2s = [
+        l2
+        for l2, _ in Counter(_row_l2_label(r) for r in rows if _row_l2_label(r)).most_common(3)
+    ]
+    signal_words = ["不满", "投诉", "故障", "垃圾", "太差", "受不了", "无法", "希望", "建议", "要求", "再也不"]
+    quotes: List[Dict[str, Any]] = []
+    seen_texts: set = set()
+    for l2 in top_l2s:
+        candidates = sorted(l2_groups.get(l2, []), key=lambda r: len(r.get("original_text") or ""))
+        best = None
+        best_score = -1
+        for c in candidates:
+            t = (c.get("original_text") or "").strip()
+            if len(t) < 20 or len(t) > 250:
+                continue
+            t_clean = re.sub(r"1[3-9]\d{9}", "138****0000", t)
+            t_clean = re.sub(r"[A-HJ-NPR-Z0-9]{17}", "VIN****", t_clean, flags=re.I)
+            if t_clean in seen_texts:
+                continue
+            score = sum(2 for sw in signal_words if sw in t_clean)
+            score += min(len(t_clean) / 50, 3)
+            if score > best_score:
+                best_score = score
+                best = (t_clean, c)
+        if best:
+            text_clean, original_row = best
+            quotes.append(
+                {
+                    "issue": l2,
+                    "quote": text_clean[:200],
+                    "l1": str(original_row.get("review_l1") or original_row.get("model_class") or ""),
+                    "l2": l2,
+                    "source": str(original_row.get("source") or ""),
+                    "count": len(l2_groups[l2]),
+                    "takeaway": "",
+                }
+            )
+            seen_texts.add(text_clean)
+    return quotes[:top_n]
+
+
+def _build_volume_stats(
+    rows: List[Dict[str, Any]], prev_stats: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """构建数量对比统计（保留扁平字段 + this_period/prev_period 结构）。"""
+    l1_counter: Counter = Counter()
+    l2_counter: Counter = Counter()
+    for r in rows:
+        l1 = str(r.get("review_l1") or r.get("model_class") or "").strip()
+        if l1:
+            l1_counter[l1] += 1
+        l2 = _row_l2_label(r)
+        if l2:
+            l2_counter[l2] += 1
+
+    total = len(rows)
+    prev_total = int((prev_stats or {}).get("total") or 0)
+    change_pct = round((total - prev_total) / max(prev_total, 1) * 100, 1) if prev_total else 0
+    prev_by_l1 = dict((prev_stats or {}).get("by_l1") or {})
+    top_l2 = [
+        {"label": k, "count": v, "share_pct": round(v / max(total, 1) * 100, 1)}
+        for k, v in l2_counter.most_common(10)
+    ]
+    return {
+        "total": total,
+        "prev_total": prev_total,
+        "change_pct": change_pct,
+        "by_l1": dict(l1_counter.most_common()),
+        "top_l2": top_l2,
+        "this_period": {"total": total, "by_l1": dict(l1_counter.most_common())},
+        "prev_period": {"total": prev_total, "by_l1": prev_by_l1},
+    }
+
+
+def _compute_trends_from_l1(
+    current_by_l1: Dict[str, int], prev_by_l1: Dict[str, int]
+) -> List[Dict[str, Any]]:
+    """由上期/本期 L1 分布推导趋势（LLM 不可用时的规则降级）。"""
+    trends: List[Dict[str, Any]] = []
+    all_l1 = set(current_by_l1) | set(prev_by_l1)
+    for l1 in sorted(all_l1):
+        cur = int(current_by_l1.get(l1) or 0)
+        prev = int(prev_by_l1.get(l1) or 0)
+        if prev:
+            change_pct = round((cur - prev) / prev * 100, 1)
+        else:
+            change_pct = 100.0 if cur else 0.0
+        if change_pct > 5:
+            direction = "up"
+        elif change_pct < -5:
+            direction = "down"
+        else:
+            direction = "flat"
+        if direction == "flat":
+            detail = f"与上周期持平（{prev} → {cur}）"
+        else:
+            arrow = "上升" if direction == "up" else "下降"
+            detail = f"相比上周期{arrow} {abs(change_pct)}%（{prev} → {cur}）"
+        trends.append(
+            {
+                "dimension": l1,
+                "direction": direction,
+                "change_pct": change_pct,
+                "detail": detail,
+            }
+        )
+    return trends
+
+
+def summarize_opinions(
+    rows: List[Dict[str, Any]],
+    *,
+    period: str,
+    region: str,
+    prev_period_stats: Optional[Dict[str, Any]] = None,
+    prev_period_rows: Optional[List[Dict[str, Any]]] = None,
+    model: str = QWEN_MODEL,
+    host: str = QWEN_HOST,
+) -> Dict[str, Any]:
     rows = rows[:300]
     compact = []
     l2_counter: Counter = Counter()
     for r in rows:
         l1 = str(r.get("review_l1") or r.get("model_class") or "").strip()
-        l2 = str(r.get("review_l2") or r.get("model_keyword") or "").split(",", 1)[0].strip()
+        l2 = _row_l2_label(r)
         if l2:
             l2_counter[l2] += 1
         compact.append(
@@ -2282,31 +2414,119 @@ def summarize_opinions(rows: List[Dict[str, Any]], *, period: str, region: str, 
                 "text": str(r.get("original_text") or "")[:240],
             }
         )
-    key = _cache_key("summary", json.dumps(compact, ensure_ascii=False), f"{period}|{region}")
+    volume_stats = _build_volume_stats(rows, prev_period_stats)
+    representative_quotes = _pick_representative_quotes(rows)
+    prev_key = json.dumps(prev_period_stats or {}, ensure_ascii=False, sort_keys=True)[:240]
+    key = _cache_key("summary", json.dumps(compact, ensure_ascii=False), f"{period}|{region}|{prev_key}")
     cached = _cache_get(key)
     if cached:
         cached["cache_hit"] = True
         return cached
-    prompt = (
-        "你是 VOC 舆情周报/月报分析专家。基于下列已脱敏舆情摘要，输出严格 JSON，供前端直接展示。\n"
-        "要求：中文输出；聚焦高频问题、风险、归因、行动建议；不要编造数据；只输出 JSON。\n"
-        f"统计周期：{period}\n区域：{region}\n"
-        f"Top二级计数：{json.dumps(l2_counter.most_common(12), ensure_ascii=False)}\n"
-        f"样本(JSON)：{json.dumps(compact, ensure_ascii=False)}\n"
-        "JSON Schema：{\"summary\":\"总体解读\", \"top_issues\":[{\"label\":\"二级标签\",\"count\":1,\"analysis\":\"原因\"}],"
-        "\"risks\":[\"风险1\"],\"actions\":[\"建议1\"],\"ppt_text\":\"可直接放入PPT的一段话\"}"
-    )
+
+    prompt = f"""你是 VOC（客户之声）舆情报告专家。根据以下数据和分析要求，输出 JSON。
+
+## 本期数据摘要
+统计周期：{period}
+区域：{region}
+总反馈数：{volume_stats['total']} 条
+上期对比：{volume_stats['prev_total']} → {volume_stats['total']}（{'↑' if volume_stats['change_pct'] > 0 else '↓'}{abs(volume_stats['change_pct'])}%）
+
+## L1 分布
+{json.dumps(volume_stats['by_l1'], ensure_ascii=False)}
+
+## Top L2 问题
+{json.dumps(volume_stats['top_l2'], ensure_ascii=False)}
+
+## 代表性原文（已脱敏手机号/VIN）
+{json.dumps(representative_quotes, ensure_ascii=False, indent=2)}
+
+## 完整样本（每条最多 240 字）
+{json.dumps(compact, ensure_ascii=False)[:8000]}
+
+## 要求
+从以下 4 个维度输出 JSON，每个维度不得为空：
+
+1. **数量分析**：总反馈数、环比变化、L1/L2 分布解读。不要只说数字，要说"什么含义"。
+2. **趋势观察**：相比上期，哪些问题在上升/下降/新出现？幅度如何？
+3. **问题表象**：高频问题的具体表现是什么？（如"车端充电问题"主要表现为地锁故障、充电枪拔不出）
+4. **代表性原文**：对前面给出的每条 quote 填写 takeaway（总结反映了什么问题），再补充 1 条你从样本中发现的有价值的原文（复制输出）。
+
+JSON Schema：
+{{
+  "summary": "总体概述（80-150 字，含数字结论、环比对比）",
+  "top_issues": [{{"label": "二级标签", "count": 数量, "analysis": "原因分析（症状级描述）", "trend": "up|down|flat", "trend_detail": "如：本月上升 15%，集中在超充站场景"}}],
+  "risks": ["风险描述1（含为什么是风险）"],
+  "actions": ["行动建议1（具体、可执行）"],
+  "ppt_text": "可直接放入 PPT/周报的一段完整段落（150-300 字，含趋势数据、归因、建议）",
+  "volume": {{
+    "total": {volume_stats['total']},
+    "prev_total": {volume_stats['prev_total']},
+    "change_pct": {volume_stats['change_pct']},
+    "top_l2_by_l1": {{}}
+  }},
+  "trends": [
+    {{"dimension": "维度名（如: 售后服务）", "direction": "up|down|flat", "change_pct": 数值, "detail": "描述"}}
+  ],
+  "representative_quotes": [
+    {{"issue": "问题名", "quote": "原文（保持原有内容）", "l1": "", "l2": "", "source": "", "count": 数量, "takeaway": "这条原文反映了什么问题"}}
+  ]
+}}
+
+不要编造数据。严格使用上面提供的数据。只输出 JSON，不要输出其他内容。"""
     try:
-        obj = extract_json_object(ollama_generate(prompt, model=model, host=host, num_predict=1200))
+        obj = extract_json_object(ollama_generate(prompt, model=model, host=host, num_predict=1400))
     except Exception:
-        top = [{"label": k, "count": v, "analysis": "高频问题，建议结合原文复核原因。"} for k, v in l2_counter.most_common(8)]
+        top = [
+            {
+                "label": k,
+                "count": v,
+                "analysis": "高频问题，建议结合原文复核原因。",
+                "trend": "flat",
+                "trend_detail": "模型不可用，仅统计频次",
+            }
+            for k, v in l2_counter.most_common(8)
+        ]
         obj = {
-            "summary": f"{period} {region} 共纳入 {len(rows)} 条舆情，高频问题集中在 " + "、".join([x["label"] for x in top[:5]]),
+            "summary": (
+                f"{period} {region} 共纳入 {len(rows)} 条舆情，高频问题集中在 "
+                + "、".join([x["label"] for x in top[:5]])
+            ),
             "top_issues": top,
             "risks": ["模型摘要不可用，已回退为规则统计摘要。"],
             "actions": ["优先复核 Top 二级问题并跟进服务/质量责任归因。"],
-            "ppt_text": f"{period} {region} VOC 舆情共 {len(rows)} 条，Top 问题为 " + "、".join([x["label"] for x in top[:5]]) + "。",
+            "ppt_text": "",
+            "trends": [],
+            "representative_quotes": representative_quotes,
         }
+
+    obj["volume"] = {**volume_stats, **(obj.get("volume") if isinstance(obj.get("volume"), dict) else {})}
+    if not obj.get("trends"):
+        obj["trends"] = _compute_trends_from_l1(
+            volume_stats.get("by_l1") or {},
+            (prev_period_stats or {}).get("by_l1") or {},
+        )
+    llm_quotes = obj.get("representative_quotes")
+    if not isinstance(llm_quotes, list) or not llm_quotes:
+        obj["representative_quotes"] = representative_quotes
+    else:
+        obj["representative_quotes"] = llm_quotes
+
+    ppt = str(obj.get("ppt_text") or "")
+    if len(ppt) < 50:
+        top_labels = [str(x.get("label") or "") for x in (obj.get("top_issues") or [])[:3] if x.get("label")]
+        trend_text = ""
+        for t in (obj.get("trends") or [])[:2]:
+            direction = t.get("direction")
+            arrow = "↑" if direction == "up" else "↓" if direction == "down" else "→"
+            trend_text += f"{t.get('dimension', '')}{arrow} "
+        chg = volume_stats["change_pct"]
+        chg_txt = f"环比+{chg}%" if chg > 0 else f"环比{chg}%"
+        obj["ppt_text"] = (
+            f"【{period} VOC 舆情报告】本期共收录 {volume_stats['total']} 条反馈（{chg_txt}），"
+            f"Top 问题：{'、'.join(top_labels) or '—'}。{trend_text}"
+            f"{str(obj.get('summary') or '')[:100]}"
+        )
+
     obj["total"] = len(rows)
     obj["period"] = period
     obj["region"] = region

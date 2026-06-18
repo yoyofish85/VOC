@@ -14,7 +14,7 @@ import time
 import threading
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
@@ -1176,6 +1176,72 @@ def _original_text_md5_hash(text: str) -> str:
     return hashlib.md5(norm.encode("utf-8")).hexdigest()
 
 
+_VIN_COLUMN_ALIASES = (
+    "VIN",
+    "Vin",
+    "vin",
+    "车辆VIN",
+    "车辆 VIN",
+    "VIN码",
+    "VIN号",
+    "车架号",
+    "车辆识别码",
+    "车辆识别号",
+    "底盘号",
+)
+_CAR_MODEL_COLUMN_ALIASES = (
+    "车型",
+    "车型名称",
+    "车辆型号",
+    "车系",
+    "Model",
+    "model",
+    "购车车型",
+    "车辆车型",
+    "车型/配置",
+)
+_PHONE_COLUMN_ALIASES = ("手机号", "手机号码", "联系电话", "电话", "客户电话", "下定手机号")
+_COUNTRY_COLUMN_ALIASES = ("国家", "市场", "地区", "区域")
+
+
+def _first_nonempty_row_value(row: Any, aliases: Tuple[str, ...]) -> str:
+    """读取 CSV 行中第一个非空别名列。"""
+    for key in aliases:
+        try:
+            val = row.get(key, "")
+        except Exception:
+            val = ""
+        s = str(val or "").strip()
+        if s:
+            return s
+    return ""
+
+
+def _extract_vin_from_text(text: str) -> str:
+    """从原文兜底提取 VIN。优先识别带 VIN/车架号提示词的 17 位编码。"""
+    s = str(text or "")
+    labeled = re.search(
+        r"(?:VIN|vin|车架号|车辆识别码|车辆识别号|底盘号)\s*[:：]?\s*([A-HJ-NPR-Z0-9]{17})",
+        s,
+        flags=re.I,
+    )
+    if labeled:
+        return labeled.group(1).upper()
+    any_vin = re.search(r"\b([A-HJ-NPR-Z0-9]{17})\b", s, flags=re.I)
+    return any_vin.group(1).upper() if any_vin else ""
+
+
+def _extract_car_model_from_text(text: str) -> str:
+    """从原文兜底提取车型，避免导入列名不统一导致年度 CSV 缺车型。"""
+    s = str(text or "")
+    m = re.search(
+        r"(?:车型|车辆型号|购车车型|车系|Model|型号)\s*[:：]?\s*([^，,。；;\n\r]+)",
+        s,
+        flags=re.I,
+    )
+    return m.group(1).strip()[:80] if m else ""
+
+
 def _norm_email_subject_sender(s: str) -> str:
     t = str(s or "").strip().lower()
     t = re.sub(r"\s+", " ", t)
@@ -2036,10 +2102,10 @@ async def upload_csv_api(background_tasks: BackgroundTasks, file: UploadFile = F
             create_time = str(row.get("舆情时间", "")).strip()
             model_class = str(row.get("一级标签", "")).strip()
             model_keyword = ",".join([str(row.get("二级标签", "")), str(row.get("三级标签", ""))]).strip(",")
-            country = str(row.get("国家", "")).strip()
-            phone = str(row.get("手机号", "")).strip()
-            vin = str(row.get("VIN", "")).strip()
-            car_model = str(row.get("车型", "")).strip()
+            country = _first_nonempty_row_value(row, _COUNTRY_COLUMN_ALIASES)
+            phone = _first_nonempty_row_value(row, _PHONE_COLUMN_ALIASES)
+            vin = _first_nonempty_row_value(row, _VIN_COLUMN_ALIASES) or _extract_vin_from_text(original_text)
+            car_model = _first_nonempty_row_value(row, _CAR_MODEL_COLUMN_ALIASES) or _extract_car_model_from_text(original_text)
             v3_meta = ""
             if "v3_label_meta" in df.columns:
                 v3_meta = str(row.get("v3_label_meta", "")).strip()
@@ -2504,7 +2570,7 @@ def _write_yearly_csv_to_disk(upload_batch: Optional[str] = None) -> str:
         '已复核' as 复核状态, COALESCE(review_note, '未填写') as 复核备注,
         SUBSTR(create_time, 1, 4) as 年度, SUBSTR(create_time, 1, 7) as 年月,
         COALESCE(reviewer, '') as 复核人, COALESCE(reviewed_at, '') as 复核时间
-        FROM opinion {wc} ORDER BY create_time DESC, opinion_id ASC'''
+        FROM opinion {wc} ORDER BY create_time ASC, opinion_id ASC'''
     data = query_db(summary_sql, pr)
     fieldnames = [
         "舆情编号", "舆情中文", "渠道", "舆情时间", "一级标签", "二级标签", "三级标签",
@@ -2699,6 +2765,7 @@ async def confirm_review_api(request: Request):
     reviewer = (data.get("reviewer") or "").strip()
     with_reflow = data.get("with_reflow", True)
     also_yearly = bool(data.get("also_yearly", False))
+    write_yearly = bool(data.get("write_yearly", also_yearly))
     try:
         rows_for_reflow, _confirmed = _write_confirm_reviews(reviews, reviewer, with_reflow)
     except Exception as e:
@@ -2712,7 +2779,7 @@ async def confirm_review_api(request: Request):
     if with_reflow and rows_for_reflow:
         reflow_async = True
         _reflow_rows_background(
-            rows_for_reflow, reviewer, "confirm", also_yearly=also_yearly, write_csv=True
+            rows_for_reflow, reviewer, "confirm", also_yearly=also_yearly, write_csv=write_yearly
         )
         msg = (
             f"复核成功，共 {len(rows_for_reflow)} 条；清洗库与金标回流已在后台执行，"
@@ -2760,7 +2827,7 @@ async def confirm_review_api(request: Request):
 
 
 def _effective_review_labels_from_row(row: dict) -> Tuple[str, str]:
-    """从人工复核字段或 v3_label_meta 解析有效一二级（用于整批确认就绪判定）。"""
+    """从人工复核字段、v3_label_meta 或导入模型列解析有效一二级。"""
     rl1 = str(row.get("review_l1") or "").strip()
     rl2 = str(row.get("review_l2") or "").strip()
     if not rl1:
@@ -2773,6 +2840,11 @@ def _effective_review_labels_from_row(row: dict) -> Tuple[str, str]:
                     rl2 = str(mj.get("l2") or "").strip()
         except Exception:
             pass
+    if not rl1:
+        rl1 = str(row.get("model_class") or "").strip()
+    if not rl2:
+        mk = str(row.get("model_keyword") or "").strip()
+        rl2 = mk.split(",", 1)[0].strip() if mk else ""
     return rl1, rl2
 
 
@@ -2796,7 +2868,7 @@ def _batch_confirm_readiness(upload_batch: str) -> Dict[str, Any]:
     """分析导入批次整批确认就绪情况。"""
     rows = query_db(
         """SELECT opinion_id, original_text, review_l1, review_l2, review_note,
-           v3_label_meta, review_status FROM opinion WHERE upload_batch = ?""",
+           v3_label_meta, model_class, model_keyword, review_status FROM opinion WHERE upload_batch = ?""",
         [upload_batch],
     )
     confirmable: List[dict] = []
@@ -3415,6 +3487,63 @@ async def api_get_single_issue_trend(
         return {"code": 500, "msg": str(e), "data": {}}
 
 
+_SUMMARY_DATE_EXPR = (
+    "substr(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(create_time,''), NULLIF(reviewed_at,''), NULLIF(created_at,''))), '/', '-'), '.', '-'), 1, 10)"
+)
+
+
+def _calc_prev_period(date_from: str, date_to: str, period: str = "month") -> Tuple[str, str]:
+    """根据周期类型计算上期时间窗口。"""
+    try:
+        d_start = datetime.strptime(date_from[:10], "%Y-%m-%d")
+        d_end = datetime.strptime(date_to[:10], "%Y-%m-%d")
+        duration = (d_end - d_start).days
+        if duration <= 0:
+            duration = 7
+        prev_end = d_start - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=duration)
+        return prev_start.strftime("%Y-%m-%d"), prev_end.strftime("%Y-%m-%d")
+    except Exception:
+        return date_from[:10], date_to[:10]
+
+
+def _summary_region_clause(region: str) -> Tuple[str, List[Any]]:
+    r = (region or "all").strip().lower()
+    cn_cond = (
+        "TRIM(IFNULL(country,'')) = '' OR IFNULL(country,'') LIKE '%中国%' OR "
+        "UPPER(TRIM(IFNULL(country,''))) IN ('CN','CHINA')"
+    )
+    if r in ("cn", "china", "中国"):
+        return f"({cn_cond})", []
+    if r in ("rest", "abroad", "海外", "非中国"):
+        return f"(TRIM(IFNULL(country,'')) != '' AND NOT ({cn_cond}))", []
+    return "", []
+
+
+def _fetch_opinion_summary_rows(date_from: str, date_to: str, region: str, limit: int) -> List[Dict[str, Any]]:
+    df, dt = (date_from or "")[:10], (date_to or "")[:10]
+    where = [
+        "review_status = 1",
+        f"{_SUMMARY_DATE_EXPR} >= ?",
+        f"{_SUMMARY_DATE_EXPR} <= ?",
+    ]
+    params: List[Any] = [df, dt]
+    region_clause, region_params = _summary_region_clause(region)
+    if region_clause:
+        where.append(region_clause)
+        params.extend(region_params)
+    lim = max(20, min(int(limit or 220), 500))
+    sql = f"""SELECT opinion_id, original_text, create_time, reviewed_at, country, source,
+        review_l1, review_l2, model_class, model_keyword, v3_label_meta
+        FROM opinion
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(reviewed_at, create_time, created_at, '') DESC
+        LIMIT ?"""
+    params.append(lim)
+    rows = query_db(sql, params)
+    return rows if isinstance(rows, list) else []
+
+
 @app.get("/api/get_opinion_summary")
 async def api_get_opinion_summary(
     date_from: str = "",
@@ -3428,57 +3557,90 @@ async def api_get_opinion_summary(
         df, dt = (date_from or "")[:10], (date_to or "")[:10]
         if len(df) < 10 or len(dt) < 10:
             return {"code": 400, "msg": "需要有效的 date_from、date_to（YYYY-MM-DD）", "data": {}}
-        where = [
-            "review_status = 1",
-            "substr(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(create_time,''), NULLIF(reviewed_at,''), NULLIF(created_at,''))), '/', '-'), '.', '-'), 1, 10) >= ?",
-            "substr(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(create_time,''), NULLIF(reviewed_at,''), NULLIF(created_at,''))), '/', '-'), '.', '-'), 1, 10) <= ?",
-        ]
-        params: List[Any] = [df, dt]
-        r = (region or "all").strip().lower()
-        cn_cond = (
-            "TRIM(IFNULL(country,'')) = '' OR IFNULL(country,'') LIKE '%中国%' OR "
-            "UPPER(TRIM(IFNULL(country,''))) IN ('CN','CHINA')"
-        )
-        if r in ("cn", "china", "中国"):
-            where.append(f"({cn_cond})")
-        elif r in ("rest", "abroad", "海外", "非中国"):
-            where.append(f"(TRIM(IFNULL(country,'')) != '' AND NOT ({cn_cond}))")
-        lim = max(20, min(int(limit or 220), 500))
-        sql = f"""SELECT opinion_id, original_text, create_time, reviewed_at, country,
-            review_l1, review_l2, model_class, model_keyword, v3_label_meta
-            FROM opinion
-            WHERE {' AND '.join(where)}
-            ORDER BY COALESCE(reviewed_at, create_time, created_at, '') DESC
-            LIMIT ?"""
-        params.append(lim)
-        rows = query_db(sql, params)
-        if not isinstance(rows, list):
-            rows = []
+        prev_df, prev_dt = _calc_prev_period(df, dt, period)
+        rows = _fetch_opinion_summary_rows(df, dt, region, limit)
+        prev_rows = _fetch_opinion_summary_rows(prev_df, prev_dt, region, limit)
+        prev_l1_counter: Counter = Counter()
+        for row in prev_rows:
+            l1 = str(row.get("review_l1") or row.get("model_class") or "").strip()
+            if l1:
+                prev_l1_counter[l1] += 1
+        prev_stats = {
+            "total": len(prev_rows),
+            "by_l1": dict(prev_l1_counter.most_common()),
+        }
+        period_label = f"{period}:{df}~{dt}"
+        if not rows:
+            from qwen_ollama import _build_volume_stats, _compute_trends_from_l1
+
+            volume = _build_volume_stats([], prev_stats)
+            return {
+                "code": 200,
+                "msg": "ok",
+                "data": {
+                    "summary": f"{df} 至 {dt} 无已复核舆情，无法生成详细汇报文案。",
+                    "top_issues": [],
+                    "risks": ["所选时间范围内无已复核数据。"],
+                    "actions": ["请调整日期范围或先完成舆情复核。"],
+                    "ppt_text": f"{df} 至 {dt} 区域 {region} 无已复核舆情。",
+                    "volume": volume,
+                    "trends": _compute_trends_from_l1({}, prev_stats.get("by_l1") or {}),
+                    "representative_quotes": [],
+                    "total": 0,
+                    "period": period_label,
+                    "region": region,
+                    "cache_hit": False,
+                },
+            }
         try:
             from qwen_ollama import summarize_opinions
 
             summary = await asyncio.to_thread(
                 summarize_opinions,
                 rows,
-                period=f"{period}:{df}~{dt}",
+                period=period_label,
                 region=region,
+                prev_period_stats=prev_stats,
+                prev_period_rows=prev_rows,
             )
         except Exception as e:
             logger.exception("get_opinion_summary qwen failed: %s", e)
+            from qwen_ollama import (
+                _build_volume_stats,
+                _compute_trends_from_l1,
+                _pick_representative_quotes,
+            )
+
             l2_counter: Counter = Counter()
             for row in rows:
                 l2 = (row.get("review_l2") or row.get("model_keyword") or "").split(",", 1)[0].strip()
                 if l2:
                     l2_counter[l2] += 1
-            top = [{"label": k, "count": v, "analysis": "高频问题，建议结合原文复核原因。"} for k, v in l2_counter.most_common(8)]
+            top = [
+                {
+                    "label": k,
+                    "count": v,
+                    "analysis": "高频问题，建议结合原文复核原因。",
+                    "trend": "flat",
+                    "trend_detail": "模型不可用，仅统计频次",
+                }
+                for k, v in l2_counter.most_common(8)
+            ]
+            volume = _build_volume_stats(rows, prev_stats)
             summary = {
                 "summary": f"{df} 至 {dt} 区域 {region} 共纳入 {len(rows)} 条已复核舆情。",
                 "top_issues": top,
                 "risks": ["本地模型摘要暂不可用，已返回规则统计摘要。"],
                 "actions": ["优先跟进 Top 二级问题并复核责任归因。"],
-                "ppt_text": f"{df} 至 {dt} VOC 舆情共 {len(rows)} 条，Top 问题为 " + "、".join([x["label"] for x in top[:5]]) + "。",
+                "ppt_text": (
+                    f"【{period_label} VOC 舆情报告】本期共收录 {len(rows)} 条反馈，"
+                    f"Top 问题：{'、'.join([x['label'] for x in top[:5]])}。"
+                ),
+                "volume": volume,
+                "trends": _compute_trends_from_l1(volume.get("by_l1") or {}, prev_stats.get("by_l1") or {}),
+                "representative_quotes": _pick_representative_quotes(rows),
                 "total": len(rows),
-                "period": f"{period}:{df}~{dt}",
+                "period": period_label,
                 "region": region,
                 "cache_hit": False,
             }

@@ -48,17 +48,42 @@
           </el-tag>
         </div>
         <p class="summary-main">{{ summaryData.summary }}</p>
+        <div v-if="summaryData.volume" class="summary-volume">
+          <span>本期 {{ summaryData.volume.total || 0 }} 条</span>
+          <span v-if="summaryData.volume.prev_total"> · 上期 {{ summaryData.volume.prev_total }} 条</span>
+          <span v-if="summaryData.volume.change_pct !== undefined">
+            · 环比 {{ summaryData.volume.change_pct > 0 ? '+' : '' }}{{ summaryData.volume.change_pct }}%
+          </span>
+        </div>
         <div class="summary-grid">
           <div>
             <div class="summary-subtitle">Top 问题</div>
             <ul>
-              <li v-for="x in summaryData.top_issues || []" :key="x.label">{{ x.label }}（{{ x.count }}）：{{ x.analysis }}</li>
+              <li v-for="x in summaryData.top_issues || []" :key="x.label">
+                {{ x.label }}（{{ x.count }}）
+                <span v-if="x.trend" class="trend-tag">{{ x.trend }}</span>
+                ：{{ x.analysis }}
+              </li>
             </ul>
           </div>
           <div>
             <div class="summary-subtitle">风险与建议</div>
             <p><strong>风险：</strong>{{ (summaryData.risks || []).join('；') || '—' }}</p>
             <p><strong>建议：</strong>{{ (summaryData.actions || []).join('；') || '—' }}</p>
+          </div>
+        </div>
+        <div v-if="(summaryData.trends || []).length" class="summary-trends">
+          <div class="summary-subtitle">趋势观察</div>
+          <ul>
+            <li v-for="t in summaryData.trends" :key="t.dimension">{{ t.dimension }}：{{ t.detail }}</li>
+          </ul>
+        </div>
+        <div v-if="(summaryData.representative_quotes || []).length" class="summary-quotes">
+          <div class="summary-subtitle">代表性原文</div>
+          <div v-for="q in summaryData.representative_quotes" :key="q.issue + q.quote" class="quote-item">
+            <div class="quote-issue">{{ q.issue }}（{{ q.count }}条）</div>
+            <div class="quote-text">「{{ q.quote }}」</div>
+            <div v-if="q.takeaway" class="quote-takeaway">{{ q.takeaway }}</div>
           </div>
         </div>
         <div class="ppt-text">{{ summaryData.ppt_text }}</div>
@@ -344,7 +369,10 @@ function renderTopOrIssue (topData) {
 }
 
 async function loadOpinionSummary () {
-  if (!dateFrom.value || !dateTo.value) return
+  if (!dateFrom.value || !dateTo.value) {
+    ElMessage.warning('请先选择开始和结束日期')
+    return
+  }
   if (summaryLoading.value) return
   summaryLoading.value = true
   try {
@@ -357,9 +385,16 @@ async function loadOpinionSummary () {
     })
     if (res.code !== 200) throw new Error(res.msg || 'summary')
     summaryData.value = res.data || null
+    if (!summaryData.value?.summary) {
+      ElMessage.warning('该时间范围内无已复核数据，无法生成汇报文案')
+    } else if ((summaryData.value.total || 0) === 0) {
+      ElMessage.warning(summaryData.value.summary)
+    } else {
+      ElMessage.success('汇报文案已生成')
+    }
   } catch (e) {
     console.error(e)
-    ElMessage.warning('AI 汇报文案暂不可用，图表数据不受影响')
+    ElMessage.warning(e.message || 'AI 汇报文案暂不可用，图表数据不受影响')
   } finally {
     summaryLoading.value = false
   }
@@ -772,6 +807,11 @@ onUnmounted(() => {
   color: #e5e7eb;
   line-height: 1.7;
 }
+.summary-volume {
+  margin-bottom: 10px;
+  color: #94a3b8;
+  font-size: 13px;
+}
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -789,6 +829,43 @@ onUnmounted(() => {
 .summary-subtitle {
   color: #facc15;
   font-weight: 600;
+}
+.summary-trends,
+.summary-quotes {
+  margin-top: 12px;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+.summary-trends ul,
+.summary-quotes ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.quote-item {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(30, 41, 59, 0.45);
+  border-radius: 6px;
+}
+.quote-issue {
+  color: #facc15;
+  font-weight: 600;
+  font-size: 12px;
+}
+.quote-text {
+  margin-top: 4px;
+  color: #e2e8f0;
+  line-height: 1.6;
+}
+.quote-takeaway {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.trend-tag {
+  margin-left: 4px;
+  color: #60a5fa;
+  font-size: 11px;
 }
 .ppt-text {
   margin-top: 12px;
