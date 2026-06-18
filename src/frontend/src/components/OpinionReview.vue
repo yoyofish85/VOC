@@ -189,7 +189,7 @@
         :loading="batchConfirmLoading"
         @click="batchConfirmReview"
       >
-        仅确认所选 ({{ selectedRows.length }})
+        仅确认所选（不写年度CSV）({{ selectedRows.length }})
       </el-button>
       <el-button
         type="info"
@@ -207,7 +207,7 @@
       </el-button>
       <el-button :disabled="!selectedBatch" @click="exportCsv">导出当前批次 CSV</el-button>
       <span class="batch-hint"
-        >「确认整批 + 归档年度数据」将确认本导入批次内<strong>全部</strong>已分类/已填标签的反馈（不受当前页 20 条限制），回流清洗库并即时写入年度 CSV；批次全部复核完成后自动升级归档标记。「仅确认所选」只处理勾选行。</span
+        >「确认整批 + 归档年度数据」将确认本导入批次内<strong>全部</strong>已分类/已填标签的反馈（不受当前页 20 条限制），回流清洗库并即时写入年度 CSV；批次全部复核完成后自动升级归档标记。「仅确认所选」只处理勾选行且不写年度 CSV。</span
       >
     </div>
 
@@ -1578,7 +1578,7 @@ const batchConfirmReview = async () => {
   const nConfirm = selectedRows.value.length
   batchConfirmLoading.value = true
   try {
-    ElMessage.info('正在确认复核、回流并尝试归档年度数据…')
+    ElMessage.info('正在确认所选并回流（不写年度 CSV）…')
     const res = await confirmReviewApi({
       reviews: selectedRows.value.map((row) => ({
         opinion_id: row.opinion_id,
@@ -1588,19 +1588,18 @@ const batchConfirmReview = async () => {
       })),
       reviewer: reviewerName.value,
       with_reflow: true,
-      also_yearly: true
+      also_yearly: false,
+      write_yearly: false
     })
     if (res.code === 200) {
-      const archived = Number(res.yearly_synced_new ?? 0)
-      const skipped = Number(res.yearly_skipped_already ?? 0)
       let detail = res.reflow_async
-        ? `成功确认 ${nConfirm} 条；清洗库回流与年度归档已在后台执行，请稍后刷新列表查看状态。`
-        : `成功确认 ${nConfirm} 条，已归档年度数据 ${archived} 条，跳过已归档 ${skipped} 条`
+        ? `成功确认所选 ${nConfirm} 条；清洗库回流已在后台执行。全量保存请点击「确认整批 + 归档年度数据」。`
+        : `成功确认所选 ${nConfirm} 条；未写年度 CSV。全量保存请点击「确认整批 + 归档年度数据」。`
       if (res.reflow_async && res.msg) {
         detail = res.msg
       }
       ElNotification({
-        title: '确认与归档',
+        title: '确认所选',
         message: detail,
         type: 'success',
         duration: 6500

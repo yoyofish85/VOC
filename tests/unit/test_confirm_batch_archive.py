@@ -74,6 +74,14 @@ def _annual_total_rows(annual_dir: Path) -> int:
         return sum(1 for _ in csv.DictReader(f))
 
 
+def _annual_rows(annual_dir: Path) -> list[dict]:
+    p = annual_dir / "年度数据总和.CSV"
+    if not p.is_file():
+        return []
+    with p.open(encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
 def _wait_until(pred, timeout: float = 20.0, interval: float = 0.1) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -232,3 +240,100 @@ def test_confirm_batch_after_fixing_unreviewed(archive_client) -> None:
     assert ok.get("code") == 200
     assert ok.get("confirmed") == 2
     assert _wait_until(lambda: _annual_total_rows(annual_dir) == 2)
+
+
+def test_annual_csv_sorted_oldest_to_newest(archive_client) -> None:
+    """年度 CSV 应按舆情时间从早到晚保存，而不是倒序。"""
+    client, main_mod, annual_dir, _ = archive_client
+    batch = "BATCH_SORT"
+    rows = [
+        ["SORT_2", "第二条", "2025-03-02 10:00:00", batch, 0, json.dumps({"l1": "非问题", "l2": ""})],
+        ["SORT_1", "第一条", "2025-03-01 09:00:00", batch, 0, json.dumps({"l1": "非问题", "l2": ""})],
+        ["SORT_3", "第三条", "2025-03-03 11:00:00", batch, 0, json.dumps({"l1": "非问题", "l2": ""})],
+    ]
+    main_mod.execute_db_many(
+        """INSERT INTO opinion (
+            opinion_id, original_text, create_time, upload_batch, review_status, v3_label_meta
+        ) VALUES (?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+
+    out = client.post(
+        "/confirm_review_batch",
+        json={"upload_batch": batch, "reviewer": "pytest", "with_reflow": True},
+    ).json()
+    assert out.get("code") == 200, out
+    assert _wait_until(lambda: _annual_total_rows(annual_dir) == 3)
+    assert [r["舆情编号"] for r in _annual_rows(annual_dir)] == ["SORT_1", "SORT_2", "SORT_3"]
+
+
+def _upload_csv(client: TestClient, rows: list[dict]) -> dict:
+    import io
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    resp = client.post(
+        "/upload_csv",
+        files={"file": ("case.csv", buf.getvalue().encode("utf-8-sig"), "text/csv")},
+    )
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def test_upload_alias_vin_model_written_to_annual_csv(archive_client) -> None:
+    """导入应兼容 VIN/车型别名列，并最终写入年度 CSV。"""
+    client, _main_mod, annual_dir, _ = archive_client
+    body = _upload_csv(
+        client,
+        [
+            {
+                "舆情编号": "ALIAS_001",
+                "舆情中文": "用户反馈车辆车机黑屏。",
+                "舆情时间": "2025-04-01 09:00:00",
+                "渠道": "测试",
+                "一级标签": "非问题",
+                "车辆VIN": "LJUBMSA13SK002038",
+                "车型名称": "Eletre S",
+            }
+        ],
+    )
+    assert body.get("code") == 200, body
+    batch = body.get("batch_id")
+    out = client.post(
+        "/confirm_review_batch",
+        json={"upload_batch": batch, "reviewer": "pytest", "with_reflow": True},
+    ).json()
+    assert out.get("code") == 200, out
+    assert _wait_until(lambda: _annual_total_rows(annual_dir) == 1)
+    row = _annual_rows(annual_dir)[0]
+    assert row["VIN"] == "LJUBMSA13SK002038"
+    assert row["车型"] == "Eletre S"
+
+
+def test_upload_extracts_vin_model_from_text_when_columns_missing(archive_client) -> None:
+    """没有 VIN/车型列时，从原文中兜底提取车辆信息。"""
+    client, _main_mod, annual_dir, _ = archive_client
+    body = _upload_csv(
+        client,
+        [
+            {
+                "舆情编号": "TEXT_001",
+                "舆情中文": "用户反馈：车型：Emira First Edition，VIN：SCCLEKAX8PHN12654，空调异味。",
+                "舆情时间": "2025-05-01 09:00:00",
+                "渠道": "测试",
+                "一级标签": "非问题",
+            }
+        ],
+    )
+    assert body.get("code") == 200, body
+    out = client.post(
+        "/confirm_review_batch",
+        json={"upload_batch": body.get("batch_id"), "reviewer": "pytest", "with_reflow": True},
+    ).json()
+    assert out.get("code") == 200, out
+    assert _wait_until(lambda: _annual_total_rows(annual_dir) == 1)
+    row = _annual_rows(annual_dir)[0]
+    assert row["VIN"] == "SCCLEKAX8PHN12654"
+    assert row["车型"] == "Emira First Edition"
