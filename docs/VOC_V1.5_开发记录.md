@@ -3,8 +3,8 @@
 > 本文档记录 V1.5 迭代中的**问题背景、改动内容、涉及文件与验证要点**，便于每次发版前核对「这次到底修了什么、没动什么」。  
 > 架构级 V3 标签体系说明见 [`VOC_V1.5_优化记录_v3.0.md`](./VOC_V1.5_优化记录_v3.0.md)。
 
-**最后更新**：2026-05-25  
-**适用分支**：VOC_V1.5 当前主开发线
+**最后更新**：2026-06-18  
+**适用分支**：VOC_V1.5 当前主开发线（`main`，commit `c51009d` 及以前）
 
 ---
 
@@ -25,6 +25,11 @@
 | R11 | 慢路径优化 | 报表 O(n²)、批量保存逐条 UPDATE、历史样例单字 LIKE | ✅ 已落地 |
 | R12 | 部署启动修复 | 服务器「后端服务启动失败」 | ✅ 已落地 |
 | R13 | 测试期缺陷 | 列表空数据 F1、暂存 500 F4 | ✅ 已落地 |
+| R14 | 六任务基础加固（T1–T6） | 部署脚本、WAL、回流失败、L2 后备、延迟回流、健康端点 | ✅ 已落地 |
+| R15 | 盲区 1–4 | 回流测试、WAL 压测、L2 API 回归、微调导出/A/B | ✅ 已落地 |
+| R16 | 14B 批量稳定性 | >150 条分类 database is locked、整批确认仅写 20 条 | ✅ 已落地 |
+| R17 | 汇报文案四维度 | 数据汇报「生成汇报文案」无反馈、summary 缺趋势/原文 | ✅ 已落地 |
+| R18 | 年度 CSV 归档修复 | 排序倒序、VIN/车型缺失、所选确认误写 CSV | ✅ 已落地 |
 
 ---
 
@@ -380,6 +385,209 @@
 
 ---
 
+### R14 · 六任务基础加固（T1–T6）（2026-06-12）
+
+#### 背景
+
+生产测试前需完成 6 项基础设施加固：部署可校验、SQLite 并发、回流可观测、L2 下拉不空、健康探针完善。交叉引用验证 54/54 PASS，基础测试 18/18 PASS。
+
+#### 六任务清单
+
+| 任务 | 主题 | 核心改动 |
+|------|------|----------|
+| **T1** | 部署脚本 | `package_code.sh` MD5 校验 + git tag；`update_server.sh` `--check-only`；`deploy_checklist.py` 自检 7 项 |
+| **T2** | 回流失败机制 | `_append_reflow_failure_jsonl` / `_mark_reflow_row_failed` / `GET /api/reflow_failures` |
+| **T3** | L2 后备列表 | 前端 `_FALLBACK_L2_LIST` / `_FALLBACK_L2_BY_L1` / `_FALLBACK_L2_FOR_L1`；后端 `merged_l2_whitelist_for_l1` / `flatten_all_hierarchy_l2` |
+| **T4** | SQLite WAL | `_ensure_db_wal_mode()`（WAL / busy_timeout 60s / 64MB cache）；`query_db` 只读 `PRAGMA query_only=ON` |
+| **T5** | 延迟回流队列 | `PENDING_REFLOW_PATH` + `_enqueue_pending_reflow` + daemon 每 60s flush |
+| **T6** | 健康端点 | `GET /api/health/detail`（integrity / journal_mode / stale_reflow / stats） |
+
+#### 同期修复的 9 个缺陷
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 1 | `draft_save_reviews` 无条件写 `reflow_synced=0` | 增加 `labels_changed` 判断 |
+| 2 | L2 下拉高负载返回空 | 后备列表 + 空缓存即时 fallback |
+| 3 | 仪表盘与列表并发超时 | WAL + query_only |
+| 4 | 部署无 MD5 | package/update 脚本增强 |
+| 5 | `_verify_and_migrate_db` 缺失 | 统一模块 init 入口 |
+| 6 | `fallbackL2ForL1` 命名不一致 | 重命名为 `_FALLBACK_L2_FOR_L1` |
+| 7 | `deploy_checklist` 行数范围偏窄 | `MAIN_LINE_RANGE = (2800, 4500)` |
+| 8 | `merge_gold_feedback` 返回 400 仍标 `reflow_synced=1` | `reflow_batch_rows` 检查 code 并 raise |
+| 9 | 前端忽略 `queued_reflow` | `execRowAutoSave` 增加后台队列提示 |
+
+#### 主要文件
+
+- `src/backend/main.py`
+- `src/backend/reflow_service.py`
+- `src/frontend/src/components/OpinionReview.vue`
+- `code_deploy/package_code.sh` / `update_server.sh` / `deploy_checklist.py`
+
+#### 验证要点
+
+- [ ] `python3 code_deploy/deploy_checklist.py` → 7/7
+- [ ] `PRAGMA journal_mode` → `wal`
+- [ ] `pytest tests/unit/test_reflow_resilience.py tests/unit/test_pending_reflow.py tests/unit/test_main_health.py tests/test_deploy.py -v` → 18 passed
+
+---
+
+### R15 · 盲区 1–4 测试与工具链（2026-06-12 ~ 06-17）
+
+#### 盲区 1 · 回流管线可靠性
+
+| 新增 | 说明 |
+|------|------|
+| `tests/unit/test_reflow_service.py` | reflow_service 核心 11 项单元测试 |
+| `performance_evaluation/check_reflow_health.py` | CI/部署后回流健康检查（**需单独 rsync 到服务器**） |
+| `tests/unit/test_check_reflow_health.py` | 健康检查脚本测试 |
+| `tests/unit/test_reflow_resilience.py` | 追加 3 个 resilience 回归 |
+
+Commit：`241b91b`
+
+#### 盲区 2 · SQLite WAL 并发压测
+
+| 新增 | 说明 |
+|------|------|
+| `tests/test_concurrent_db.py` | 3 个 `@pytest.mark.perf` 测试：10 写 + 10 读、WAL 重启持久、回流+查询并发 |
+
+仅开发机验证，不改生产代码。Commit：`618e9e7`
+
+#### 盲区 3 · L2 后备 API 回归
+
+| 新增 | 说明 |
+|------|------|
+| `tests/unit/test_taxonomy_fallback.py` | 4 项：`get_l2_by_l1`、未知 L1、批量 L1、空 L1 |
+
+Commit：`c248d16`
+
+#### 盲区 4 · 微调技术风险前置
+
+| 新增 | 说明 |
+|------|------|
+| `performance_evaluation/export_finetune_from_db.py` | 复核数据 → JSONL；seed=42 锁定 10% holdout |
+| `performance_evaluation/ab_compare_models.py` | baseline / candidate / compare holdout A/B |
+| `tests/unit/test_export_finetune.py` | 4 项导出测试 |
+| `tests/unit/test_ab_compare.py` | 2 项 A/B 测试 |
+| `data/holdout_opinion_ids.json` | holdout 锁定集（首次导出写入） |
+
+开发机 DB 当前 0 条可导出复核样本；服务器有数据后需先跑正式导出。Commit：`81dc57e`
+
+#### 验证要点
+
+- [ ] `pytest tests/unit/test_reflow_service.py tests/unit/test_check_reflow_health.py -v` → 通过
+- [ ] `pytest tests/test_concurrent_db.py -m perf -v` → 3 passed
+- [ ] `pytest tests/unit/test_taxonomy_fallback.py -v` → 4 passed
+- [ ] `pytest tests/unit/test_export_finetune.py tests/unit/test_ab_compare.py -v` → 6 passed
+
+---
+
+### R16 · 14B 批量分类稳定性 + 整批确认归档（2026-06-17）
+
+#### 问题 1：14B 批量 >150 条崩溃
+
+| 项 | 内容 |
+|----|------|
+| 现象 | `database is locked`，分类任务中断 |
+| 根因 | `run_batch_classify` 全程持有一个 SQLite 写连接，批次结束才 commit |
+| 修复 | 读连接加载后立即关闭；结果缓冲每 `VOC_QWEN_COMMIT_EVERY`（默认 10）条短事务 flush；周期性 `PRAGMA wal_checkpoint(PASSIVE)` |
+
+#### 问题 2：年度 CSV 仅保存约 20 条
+
+| 项 | 内容 |
+|----|------|
+| 现象 | 导入 200+ 条，年度 CSV 只有当前页勾选行 |
+| 根因 | 「确认复核」只提交 `selectedRows`（每页最多 20 条）；年度 CSV 仅在整批完成时写入 |
+| 修复 | 新增 `POST /confirm_review_batch` 整批确认；`GET /confirm_review_batch/preview` 有未就绪行时 409；每次确认即 `_write_yearly_csv_to_disk`；`_YEARLY_CSV_LOCK` 防并发写 |
+
+#### 主要文件
+
+- `src/backend/voc_classifier_service.py`
+- `src/backend/main.py`
+- `src/frontend/src/api/review.js`
+- `src/frontend/src/components/OpinionReview.vue`
+- `tests/test_classify_stress.py`（300 行 + 并发写）
+- `tests/unit/test_confirm_batch_archive.py`（5 项）
+
+Commit：`903deea`
+
+#### 验证要点
+
+- [ ] `pytest tests/test_classify_stress.py -v` → 2 passed（无 database is locked）
+- [ ] `pytest tests/unit/test_confirm_batch_archive.py -v` → 5 passed
+- [ ] 复核页主按钮为「确认整批 + 归档年度数据」
+
+---
+
+### R17 · 汇报文案四维度增强（2026-06-18）
+
+#### 问题
+
+数据汇报页「生成汇报文案」按钮点击后无可见反馈；`summarize_opinions` 输出缺少数量对比、趋势、代表性原文。
+
+#### 后端改动（`qwen_ollama.py`）
+
+- 新参数：`prev_period_stats`、`prev_period_rows`
+- 辅助函数：`_pick_representative_quotes`、`_build_volume_stats`、`_compute_trends_from_l1`
+- 四维度 prompt：数量 / 趋势 / 问题表象 / 代表性原文（脱敏）
+- **保留**原字段：`summary`、`top_issues`、`risks`、`actions`、`ppt_text`、`total`、`period`、`region`、`cache_hit`
+- **新增**字段：`volume`（含 `this_period`/`prev_period`）、`trends`、`representative_quotes`；`top_issues[]` 增加 `trend`/`trend_detail`
+- `ppt_text` 过短时程序组装降级版本；缓存 key 纳入上期统计摘要
+
+#### API 改动（`main.py`）
+
+- `_calc_prev_period`、`_fetch_opinion_summary_rows` 查询上期已复核数据
+- 无已复核数据时返回明确提示（不再静默空响应）
+- LLM 失败时规则降级也包含新字段
+
+#### 前端改动（`DataReport.vue`）
+
+- 缺日期 / 无数据 / 成功 / 错误均有 `ElMessage` 提示
+- 展示数量环比、趋势观察、代表性原文
+
+#### 测试
+
+- `tests/unit/test_opinion_summary.py` → 5 passed
+
+Commit：`580c2ed`
+
+#### 验证要点
+
+- [ ] `pytest tests/unit/test_opinion_summary.py -v` → 5 passed
+- [ ] `GET /api/get_opinion_summary?date_from=...&date_to=...` 响应含 `volume`、`trends`、`representative_quotes`
+
+---
+
+### R18 · 年度 CSV 归档修复（2026-06-18）
+
+#### 问题
+
+用户实测：仅 20 行入 CSV、时间倒序、缺 VIN/车型；「仅确认所选」误触发年度写入。
+
+#### 修复
+
+| 项 | 改动 |
+|----|------|
+| 排序 | `_write_yearly_csv_to_disk` 改为 `ORDER BY create_time ASC, opinion_id ASC` |
+| 列别名 | `_VIN_COLUMN_ALIASES`、`_CAR_MODEL_COLUMN_ALIASES` 等；上传 CSV 兼容「车辆VIN」「车型名称」 |
+| 原文兜底 | `_extract_vin_from_text`、`_extract_car_model_from_text` |
+| 标签兜底 | `_effective_review_labels_from_row` 回退 `model_class`/`model_keyword` |
+| 所选确认 | `confirmReviewApi` 传 `also_yearly: false, write_yearly: false`；按钮文案「仅确认所选（不写年度CSV）」 |
+
+#### 新增测试（`test_confirm_batch_archive.py`）
+
+- `test_annual_csv_sorted_oldest_to_newest`
+- `test_upload_alias_vin_model_written_to_annual_csv`
+- `test_upload_extracts_vin_model_from_text_when_columns_missing`
+
+Commit：`c51009d`（含 `580c2ed` 中 `main.py` 年度相关改动）
+
+#### 验证要点
+
+- [ ] `pytest tests/unit/test_confirm_batch_archive.py -v` → 8 passed
+- [ ] 年度 CSV 时间从早到晚；VIN/车型列有值
+
+---
+
 ## 四、新增 / 关键 API 一览
 
 | 方法 | 路径 | 用途 |
@@ -392,6 +600,11 @@
 | POST | `/api/batch_classify` | 异步批量分类（返回 job_id） |
 | GET | `/api/batch_classify/status/{job_id}` | 分类任务进度 |
 | GET | `/api/health`、`/health` | 探活 |
+| GET | `/api/health/detail` | 详细健康（WAL / integrity / stale_reflow / stats） |
+| GET | `/api/reflow_failures` | 回流失败记录 |
+| POST | `/api/confirm_review_batch` | 整批确认 + 即时写年度 CSV |
+| GET | `/api/confirm_review_batch/preview` | 整批确认前预览（未就绪行 409） |
+| GET | `/api/get_opinion_summary` | AI 汇报文案（四维度：volume/trends/quotes/ppt） |
 
 ---
 
@@ -403,6 +616,7 @@
 src/backend/v3_materialized.py
 src/backend/rule_conflict_detector.py
 src/backend/classify_metrics_logger.py
+src/backend/reflow_service.py
 label_project/rule_conflict_keywords_v1.json
 ```
 
@@ -411,12 +625,22 @@ label_project/rule_conflict_keywords_v1.json
 ```
 src/backend/main.py
 src/backend/voc_classifier_service.py
-src/backend/report_aggregator.py
 src/backend/qwen_ollama.py
+src/backend/report_aggregator.py
 label_project/offline_validate.py
 src/frontend/src/components/OpinionReview.vue
 src/frontend/src/views/DataReport.vue
+src/frontend/dist/（npm run build 后）
 app_launcher.py
+code_deploy/update.zip + update.zip.md5
+```
+
+**需单独拷贝（不在 update.zip 内）：**
+
+```
+performance_evaluation/check_reflow_health.py
+performance_evaluation/export_finetune_from_db.py
+performance_evaluation/ab_compare_models.py
 ```
 
 **服务器手动排查：**
@@ -429,16 +653,124 @@ python3 main.py
 
 ---
 
-## 六、修订历史
+## 六、识别率与路由指标（2026-06-18 快照）
+
+### 6.1 正式评估基线（生产库 Week 0，2026-06-04）
+
+来源：`performance_evaluation/state/evolution_baseline.json`（`evaluate_accuracy.py` 在 M4-B r4 patch 后锁定）
+
+| 指标 | 数值 | 样本量 |
+|------|------|--------|
+| **一级（L1）准确率** | **86.98%** | 2004 / 2304 |
+| **二级（L2）准确率** | **76.90%** | 516 / 671（业务三类且 L1 一致） |
+| 已复核累计 | 2362 条 | `review_status=1` |
+| 规则版本 | v12_m4b_r4 | — |
+| M4-B fixable 池 | regression=0, other_l1=0, primary=0 | 规则轨见底 |
+
+**进化闭环 MVP 目标**（`evolution_loop_mvp_plan_20260604.md`）：
+
+| 阶段 | L1 目标 | L2 目标 |
+|------|---------|---------|
+| 第 1 月末 | ≥ 88% | — |
+| 第 2 月末 | ≥ 90% | 微调首包 ≥ 4000 条 |
+| 第 3 月末 | 90–93% | 82–88% |
+| 长期 KPI | **≥ 95%** | **≥ 90%** |
+
+微调触发条件（尚未满足）：新增复核 ≥ 3000 条 **且** L1 不一致 ≥ 800 条 **且** 连续 2 周 fixable < 5。
+
+### 6.2 历史优化对比（词库/规则迭代，2026-02）
+
+来源：`Project Documentation/优化文档/大模型分类准确率对比数据表.md`
+
+| 指标 | 优化前 | 优化后 | Δ |
+|------|--------|--------|---|
+| 总体分类准确率 | 65.2% | 78.5% | +13.3pp |
+| 关键词匹配率 | 45.2% | 68.7% | +23.5pp |
+| 词库规模 | 100 | 287 | +187 |
+
+按 L1 类型（优化后）：质量问题 76.8%、营销服务 81.2%、体验需求 74.3%、咨询 84.6%、非问题 82.1%。
+
+### 6.3 三级标签映射验证（2026-03）
+
+来源：`label_project/validation_report.md`
+
+| 指标 | 数值 |
+|------|------|
+| 抽样量 | 100 / 645 |
+| L3 映射匹配率 | **97.00%**（97/100） |
+| 不匹配原因 | 3 条「三级标签不在映射列表中」 |
+
+### 6.4 开发机当前库（2026-06-18 实测）
+
+来源：`evaluate_accuracy.py` 对 `src/backend/opinion_review.db` 只读评估
+
+| 指标 | 数值 | 说明 |
+|------|------|------|
+| 已复核条数 | 34 | 测试库，非生产快照 |
+| L1 可评估条数 | 0 | 无 `review_l1` 或未填模型侧 L1 |
+| L1 / L2 准确率 | N/A | 分母为 0，**不可与 Week 0 基线对比** |
+
+> 识别率请以**服务器生产库**运行 `python3 performance_evaluation/evaluate_accuracy.py --db <生产库路径>` 为准。
+
+### 6.5 分类路由指标（classify_route_metrics.jsonl）
+
+近期压测与生产路由摘要（2026-06-16 ~ 06-18）：
+
+| 场景 | 条数 | 耗时 | gold_hit | conflict | llm_arbitrated | 备注 |
+|------|------|------|----------|----------|----------------|------|
+| 规则分类（小批） | 12 | ~0.01s | 0 | 0 | 0 | `rule_ok=12` |
+| 14B 所选（2 条） | 2 | ~0.9s | 0 | 0 | 2 | 低置信走 LLM |
+| **压测 300 条 14B** | 300 | **~1.2–1.3s** | 0 | 0 | 300 | `test_classify_stress` mock；无 lock |
+| 压测 60 条 14B | 60 | ~0.7s | 0 | 0 | 60 | 增量 commit 验证 |
+
+R2 阶段曾记录全量实测约 **50%**（M3 Max 硬件、14B 不宜默认全量）；经 R3–R7 金标/冲突/路由优化 + M4-B patch 后，Week 0 基线升至 **L1 86.98%**。
+
+### 6.6 识别率评估命令
+
+```bash
+# 生产/服务器库（只读）
+python3 performance_evaluation/evaluate_accuracy.py --db path/to/opinion_review.db
+
+# 可选：14B 影子评估（最近 N 条，不写库）
+python3 performance_evaluation/evaluate_accuracy.py --qwen-shadow-limit 50
+
+# 分类路由日志
+curl -s 'http://localhost:8000/api/classification/route_metrics?limit=20' | python3 -m json.tool
+
+# 微调样本导出（服务器有复核数据后）
+python3 performance_evaluation/export_finetune_from_db.py
+python3 performance_evaluation/ab_compare_models.py --baseline
+```
+
+报告输出：`performance_evaluation/reports/YYYYMMDD_HHMM_report.txt`  
+对比基准：`performance_evaluation/state/last_eval.json`
+
+### 6.7 2026-06 新增测试覆盖（识别率相关保障）
+
+| 测试文件 | 条数 | 覆盖能力 |
+|----------|------|----------|
+| `test_classify_stress.py` | 2 | 300 行 14B 无 database is locked |
+| `test_confirm_batch_archive.py` | 8 | 整批归档、VIN/车型、排序 |
+| `test_opinion_summary.py` | 5 | 汇报 volume/环比/quotes |
+| `test_reflow_service.py` + resilience | 14+ | 回流正确性 |
+| `test_concurrent_db.py` | 3 | WAL 并发 |
+| `test_taxonomy_fallback.py` | 4 | L2 API 后备 |
+| `test_export_finetune.py` + `test_ab_compare.py` | 6 | 微调导出与 A/B |
+| **合计（本节相关）** | **45 passed** | 2026-06-18 实测 |
+
+---
+
+## 七、修订历史
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-05-25 | v1.0 | 首版：汇总 R1–R12 性能、准确率、P1–P3、部署启动修复 |
 | 2026-05-25 | v1.1 | 新增 R13：F1 列表参数顺序、F4 暂存绑定、F5 测试断言 |
+| 2026-06-18 | v2.0 | 新增 R14–R18：六任务、盲区 1–4、14B 稳定性、整批归档、汇报四维度、年度 CSV；新增「识别率与路由指标」专章 |
 
 ---
 
-## 七、后续记录模板（复制使用）
+## 八、后续记录模板（复制使用）
 
 ```markdown
 ### Rxx · 标题（YYYY-MM-DD）

@@ -46,6 +46,7 @@ QWEN_NUM_PREDICT = int(os.environ.get("VOC_QWEN_NUM_PREDICT", "768"))
 # 分类专用：更短输出 + 适中上下文，明显加快 14B 单次推理
 QWEN_CLASSIFY_NUM_PREDICT = int(os.environ.get("VOC_QWEN_CLASSIFY_NUM_PREDICT", "340"))
 QWEN_CLASSIFY_NUM_CTX = int(os.environ.get("VOC_QWEN_CLASSIFY_NUM_CTX", "12288"))
+QWEN_CLASSIFY_TEXT_MAX_CHARS = max(400, int(os.environ.get("VOC_QWEN_CLASSIFY_TEXT_MAX_CHARS", "1400")))
 # 分类 JSON：解析或字段缺失时最多请求 2 次（首次 + 重试 1 次），与 QWEN_CLASSIFY_RETRIES 解耦
 _CLASSIFY_JSON_ATTEMPTS = 2
 # 批量 14B 分类调用固定采样参数（不受环境变量覆盖，保证结果稳定）
@@ -236,6 +237,16 @@ def _classify_json_has_nonempty_l12(obj: Dict[str, Any]) -> bool:
     if l1c == NON_ISSUE_L1:
         return True
     return bool(l2)
+
+
+def _compact_classify_text(text: str, max_chars: int = QWEN_CLASSIFY_TEXT_MAX_CHARS) -> str:
+    """限制单条 14B 分类输入长度，避免超长原文拖垮单条推理。"""
+    t = (text or "").strip()
+    if len(t) <= max_chars:
+        return t
+    head_n = int(max_chars * 0.7)
+    tail_n = max_chars - head_n
+    return f"{t[:head_n]}\n……（中间超长内容已省略）……\n{t[-tail_n:]}"
 
 
 def _strict_whitelist_l1_l2(
@@ -2055,15 +2066,16 @@ def classify_text(text: str, *, db_path: str, country: str = "", model: str = QW
     text = (text or "").strip()
     if not text:
         return {"l1": "", "l2": "", "l3": "", "keywords": [], "risk_level": "低", "confidence": 0.0, "match_type": "qwen_empty"}
+    classify_text_for_prompt = _compact_classify_text(text)
     l2_map = load_l2_whitelist()
-    examples = historical_examples(db_path, text)
+    examples = historical_examples(db_path, classify_text_for_prompt)
     extra = json.dumps({"l2": l2_map, "examples": examples, "country": country}, ensure_ascii=False)
     key = _cache_key("classify_v12_m4b_r4", text, extra)
     cached = _cache_get(key)
     if cached:
         cached["cache_hit"] = True
         return cached
-    prompt = build_classify_prompt(text, l2_map, examples, country=country)
+    prompt = build_classify_prompt(classify_text_for_prompt, l2_map, examples, country=country)
     obj: Optional[Dict[str, Any]] = None
     last_err = ""
     for attempt in range(_CLASSIFY_JSON_ATTEMPTS):

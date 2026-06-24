@@ -337,3 +337,41 @@ def test_upload_extracts_vin_model_from_text_when_columns_missing(archive_client
     row = _annual_rows(annual_dir)[0]
     assert row["VIN"] == "SCCLEKAX8PHN12654"
     assert row["车型"] == "Emira First Edition"
+
+
+def test_review_list_skip_total_keeps_last_pages_fast(archive_client) -> None:
+    """翻到后续页时可跳过重复 COUNT，避免最后几页被 COUNT + OFFSET 拖超时。"""
+    client, main_mod, _annual_dir, _ = archive_client
+    rows = []
+    for i in range(25):
+        rows.append(
+            [
+                f"PAGE_{i:03d}",
+                f"第 {i} 条人工复核分页数据",
+                f"2025-06-{(i % 28) + 1:02d} 09:00:00",
+                "BATCH_PAGE",
+                0,
+                json.dumps({"l1": "产品质量类", "l2": "车机问题", "confidence": 0.88}),
+            ]
+        )
+    main_mod.execute_db_many(
+        """INSERT INTO opinion (
+            opinion_id, original_text, create_time, upload_batch, review_status, v3_label_meta
+        ) VALUES (?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+
+    first = client.get(
+        "/get_review_list",
+        params={"page": 1, "size": 20, "uploadBatch": "BATCH_PAGE"},
+    ).json()
+    assert first.get("code") == 200, first
+    assert first.get("total") == 25
+
+    second = client.get(
+        "/get_review_list",
+        params={"page": 2, "size": 20, "uploadBatch": "BATCH_PAGE", "skipTotal": True},
+    ).json()
+    assert second.get("code") == 200, second
+    assert second.get("total") == -1
+    assert len(second.get("data") or []) == 5

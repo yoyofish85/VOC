@@ -43,7 +43,7 @@ request.interceptors.response.use(
 
 /** 列表仅分页数据；超时与后端 wait_for 对齐并留余量 */
 export const getReviewListApi = (params, config = {}) =>
-  request.get('/get_review_list', { params, timeout: 35000, ...config })
+  request.get('/get_review_list', { params, timeout: 70000, ...config })
 
 export const getOpinionDetailApi = (params) =>
   request.get('/api/opinion_detail', { params, timeout: 20000 })
@@ -154,7 +154,7 @@ export const getDashboardStatsApi = (config = {}) =>
   request.get('/dashboard_stats', { timeout: 30000, ...config })
 
 /** 批量智能分类（大批量时后端返回 202 + job_id） */
-export const batchClassifyApi = (data) => request.post('/batch_classify', data, { timeout: 300000 });
+export const batchClassifyApi = (data) => request.post('/batch_classify', data, { timeout: 30000 });
 
 /** 异步分类任务状态 */
 export const getBatchClassifyStatusApi = (jobId) =>

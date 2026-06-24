@@ -680,6 +680,8 @@ def ensure_performance_indexes():
         "CREATE INDEX IF NOT EXISTS idx_opinion_batch_rs ON opinion(upload_batch, review_status)",
         "CREATE INDEX IF NOT EXISTS idx_opinion_rs_ctime ON opinion(review_status, create_time)",
         "CREATE INDEX IF NOT EXISTS idx_opinion_create_time ON opinion(create_time)",
+        "CREATE INDEX IF NOT EXISTS idx_opinion_batch_ctime_oid ON opinion(upload_batch, create_time DESC, opinion_id)",
+        "CREATE INDEX IF NOT EXISTS idx_opinion_batch_rs_ctime_oid ON opinion(upload_batch, review_status, create_time DESC, opinion_id)",
         # 报表/时间轴：首列时间归一后范围扫描（表达式索引，SQLite 3.31+）
         "CREATE INDEX IF NOT EXISTS idx_opinion_evt_day ON opinion(substr(replace(replace(trim(coalesce(nullif(create_time,''), nullif(reviewed_at,''), nullif(created_at,''))),'/','-'),'.','-'),1,10))",
         "CREATE INDEX IF NOT EXISTS idx_opinion_v3_l1 ON opinion(v3_l1)",
@@ -1595,6 +1597,7 @@ async def get_review_list_api(
     filterSource: str = "",
     mismatchFilter: str = "",
     opinionIds: str = "",
+    skipTotal: bool = False,
 ):
     try:
         page = max(1, int(page or 1))
@@ -1698,11 +1701,13 @@ async def get_review_list_api(
 
     def _fetch_review_list_page() -> Dict[str, Any]:
         try:
-            count_result = query_db(count_sql, params, fetch_all=False)
-            total = int(count_result["cnt"]) if count_result and count_result.get("cnt") is not None else 0
+            total = -1
+            if not skipTotal:
+                count_result = query_db(count_sql, params, fetch_all=False)
+                total = int(count_result["cnt"]) if count_result and count_result.get("cnt") is not None else 0
             offset = (page - 1) * size
             preview_n = REVIEW_LIST_TEXT_PREVIEW
-            data_sql = f"""SELECT {REVIEW_LIST_SELECT_BODY} FROM opinion {where_sql} ORDER BY create_time DESC LIMIT ? OFFSET ?"""
+            data_sql = f"""SELECT {REVIEW_LIST_SELECT_BODY} FROM opinion {where_sql} ORDER BY create_time DESC, opinion_id DESC LIMIT ? OFFSET ?"""
             list_params = [preview_n, preview_n, *params, size, offset]
             data = query_db(data_sql, list_params)
             for row in data:

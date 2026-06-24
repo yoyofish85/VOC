@@ -881,7 +881,7 @@ const submitBatchClassify = async ({ upload_batch, opinion_ids, use_llm }) => {
   let asyncJobStarted = false
   const expectedTotal = opinion_ids?.length || 0
   try {
-    const payload = { use_llm }
+    const payload = { use_llm, async: !!use_llm }
     if (opinion_ids?.length) payload.opinion_ids = opinion_ids
     else payload.upload_batch = upload_batch
     const res = await batchClassifyApi(payload)
@@ -1061,6 +1061,9 @@ const buildParams = () => {
     confidenceMin: confRange.value[0] > 0 ? confRange.value[0] : undefined,
     confidenceMax: confRange.value[1] < 1 ? confRange.value[1] : undefined
   }
+  if (page.value > 1 && total.value > 0) {
+    p.skipTotal = true
+  }
   if (dateRange.value?.length === 2) {
     p.dateFrom = dateRange.value[0]
     p.dateTo = dateRange.value[1]
@@ -1184,7 +1187,9 @@ const getReviewList = async () => {
         row.review_l2 = item.review_l2 || v3?.l2 || ''
         return row
       })
-      total.value = res.total || 0
+      if (Number(res.total) >= 0) {
+        total.value = res.total || 0
+      }
       await nextTick()
       setTimeout(() => {
         hydratePageL2Options()

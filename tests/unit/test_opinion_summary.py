@@ -151,3 +151,29 @@ def test_ppt_text_fallback(mock_rows):
     assert len(ppt) > 5
     assert "VOC" in ppt
     assert "15" in ppt
+
+
+def test_classify_text_compacts_long_original_before_prompt(tmp_path):
+    """超长原文不会完整塞入 14B prompt，避免单条推理拖到前端超时。"""
+    from qwen_ollama import classify_text
+
+    long_text = "车机黑屏无法恢复。" + ("超长描述" * 500)
+    prompts = []
+
+    def fake_generate(prompt, **_kwargs):
+        prompts.append(prompt)
+        return '{"l1":"产品质量类","l2":"车机问题","confidence":0.86,"keywords":["黑屏"],"risk_level":"中"}'
+
+    with (
+        patch("qwen_ollama.ollama_generate", side_effect=fake_generate),
+        patch("qwen_ollama.load_l2_whitelist", return_value={"产品质量类": ["车机问题"]}),
+        patch("qwen_ollama.historical_examples", return_value=[]),
+        patch("qwen_ollama._cache_get", return_value=None),
+        patch("qwen_ollama._cache_set", return_value=None),
+    ):
+        result = classify_text(long_text, db_path=str(tmp_path / "empty.db"))
+
+    assert result["l1"] == "产品质量类"
+    assert prompts
+    assert prompts[0].count("超长描述") < long_text.count("超长描述")
+    assert "中间超长内容已省略" in prompts[0]
