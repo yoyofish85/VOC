@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -36,6 +37,8 @@ from taxonomy_normalize import (  # noqa: E402
     strip_non_issue_l2,
     try_canonicalize_l1,
 )
+
+logger = logging.getLogger("voc.qwen_ollama")
 
 QWEN_MODEL = os.environ.get("VOC_QWEN_MODEL", "qwen2.5:14b-instruct-q4_K_M")
 QWEN_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
@@ -67,6 +70,11 @@ _L2_WHITELIST_CACHE: Optional[Dict[str, List[str]]] = None
 _L2_WHITELIST_MTIME: float = -1.0
 _HIST_EXAMPLES_CACHE: Dict[str, Tuple[float, List[Dict[str, str]]]] = {}
 _HIST_EXAMPLES_TTL = float(os.environ.get("VOC_QWEN_HIST_TTL", "90"))
+_MLX_MODEL = None
+_MLX_TOKENIZER = None
+_MLX_LOADED = False
+_MLX_MODEL_PATH = None
+_MLX_LOAD_LOCK = threading.Lock()
 
 
 def _load_json(path: Path, default: Any) -> Any:
@@ -2062,6 +2070,138 @@ def apply_classification_post_rules(
     return l1, l2, flags
 
 
+def _post_process_classify_result(
+    obj: Dict[str, Any],
+    text: str,
+    l2_map: Dict[str, List[str]],
+    *,
+    model: str = QWEN_MODEL,
+    match_type: str = "qwen14b_structured",
+) -> Optional[Dict[str, Any]]:
+    """统一处理 LLM 分类 JSON：白名单校验、规则后处理、置信度和标记补充。"""
+    raw_l1 = str(obj.get("l1") or obj.get("一级标签") or "").strip()
+    raw_l2 = str(obj.get("l2") or obj.get("二级标签") or "").strip()
+    wl1, wl2 = _strict_whitelist_l1_l2(raw_l1, raw_l2, l2_map)
+    if wl1 is None or wl2 is None:
+        return None
+
+    keywords = obj.get("问题关键词") or obj.get("keywords") or []
+    if isinstance(keywords, str):
+        keywords = [x.strip() for x in keywords.split(",") if x.strip()]
+    if not isinstance(keywords, list):
+        keywords = []
+    risk = str(obj.get("风险等级") or obj.get("risk_level") or "低").strip()
+    if risk not in ("高", "中", "低"):
+        risk = "低"
+    conf = float(obj.get("confidence") or 0.75)
+
+    l1, l2, rule_flags = apply_classification_post_rules(text, wl1, wl2, l2_map)
+    guard = bool(rule_flags.get("non_issue_guard"))
+    if guard:
+        conf = max(conf, 0.82)
+    if rule_flags.get("consult_misclass"):
+        conf = min(conf, 0.45)
+    if rule_flags.get("charging_guard"):
+        conf = max(conf, 0.84)
+    if rule_flags.get("srv_quality_guard"):
+        conf = max(conf, 0.83)
+    if rule_flags.get("pos_captured"):
+        conf = max(conf, 0.86)
+
+    consult_misclass = bool(rule_flags.get("consult_misclass"))
+    pos_captured = bool(rule_flags.get("pos_captured"))
+    charging_guard = bool(rule_flags.get("charging_guard"))
+    srv_quality_guard = bool(rule_flags.get("srv_quality_guard"))
+
+    out = {
+        "l1": l1,
+        "l2": l2,
+        "l3": "",
+        "keywords": [str(x).strip() for x in keywords if str(x).strip()][:12],
+        "risk_level": risk,
+        "confidence": conf,
+        "match_type": match_type,
+        "model": model,
+        "cache_hit": False,
+        "needs_review": consult_misclass,
+    }
+    if guard:
+        out["non_issue_guard"] = True
+    if consult_misclass:
+        out["l2_consult_guard"] = True
+        out["raw_model_l2"] = wl2[:120]
+    if pos_captured:
+        out["positive_capture"] = True
+        out["raw_model_l1"] = wl1[:120]
+        out["raw_model_l2"] = wl2[:120]
+    if charging_guard:
+        out["charging_domain_guard"] = True
+        out["raw_model_l1"] = wl1[:120]
+        out["raw_model_l2"] = wl2[:120]
+    if srv_quality_guard:
+        out["srv_quality_guard"] = True
+        out["raw_model_l1"] = wl1[:120]
+        out["raw_model_l2"] = wl2[:120]
+    l1, l2 = strip_non_issue_l2(l1, l2)
+    out["l1"] = l1
+    out["l2"] = l2
+    return out
+
+
+def _mlx_model_load() -> bool:
+    """懒加载 MLX 模型 + 可选 LoRA adapter。"""
+    global _MLX_MODEL, _MLX_TOKENIZER, _MLX_LOADED, _MLX_MODEL_PATH
+    adapter_path = os.environ.get("VOC_MLX_ADAPTER", "").strip()
+    model_path = os.environ.get("VOC_MLX_MODEL", "mlx-community/Qwen2.5-14B-Instruct-4bit").strip()
+    load_key = f"{model_path}|{adapter_path}"
+    if _MLX_LOADED and _MLX_MODEL is not None and _MLX_MODEL_PATH == load_key:
+        return True
+    with _MLX_LOAD_LOCK:
+        if _MLX_LOADED and _MLX_MODEL is not None and _MLX_MODEL_PATH == load_key:
+            return True
+        try:
+            from mlx_lm import load
+
+            logger.info("MLX 加载模型: %s (adapter=%s)", model_path, adapter_path or "无")
+            _MLX_MODEL, _MLX_TOKENIZER = load(
+                model_path,
+                adapter_path=adapter_path if adapter_path else None,
+            )
+            _MLX_MODEL_PATH = load_key
+            _MLX_LOADED = True
+            logger.info("MLX 模型加载完成")
+            return True
+        except Exception as e:
+            logger.exception("MLX 模型加载失败: %s", e)
+            _MLX_MODEL = None
+            _MLX_TOKENIZER = None
+            _MLX_MODEL_PATH = None
+            _MLX_LOADED = False
+            return False
+
+
+def _mlx_generate(prompt: str, max_tokens: int = 128) -> str:
+    """调用 MLX 模型生成文本。"""
+    from mlx_lm import generate
+
+    if _MLX_MODEL is None or _MLX_TOKENIZER is None:
+        raise RuntimeError("MLX model is not loaded")
+    messages = [{"role": "user", "content": prompt}]
+    formatted = _MLX_TOKENIZER.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    return generate(
+        _MLX_MODEL,
+        _MLX_TOKENIZER,
+        prompt=formatted,
+        max_tokens=max_tokens,
+        temperature=float(os.environ.get("VOC_QWEN_TEMPERATURE", "0.1")),
+        verbose=False,
+    )
+
+
 def classify_text(text: str, *, db_path: str, country: str = "", model: str = QWEN_MODEL, host: str = QWEN_HOST) -> Dict[str, Any]:
     text = (text or "").strip()
     if not text:
@@ -2069,6 +2209,67 @@ def classify_text(text: str, *, db_path: str, country: str = "", model: str = QW
     classify_text_for_prompt = _compact_classify_text(text)
     l2_map = load_l2_whitelist()
     examples = historical_examples(db_path, classify_text_for_prompt)
+    if os.environ.get("VOC_USE_MLX") == "1":
+        mlx_model_name = os.environ.get("VOC_MLX_MODEL", "mlx-community/Qwen2.5-14B-Instruct-4bit").strip()
+        if not _mlx_model_load():
+            return {
+                "l1": "",
+                "l2": "",
+                "l3": "",
+                "keywords": [],
+                "risk_level": "低",
+                "confidence": 0.0,
+                "match_type": "mlx_load_failed",
+                "model": mlx_model_name,
+                "cache_hit": False,
+                "needs_review": True,
+                "error": "MLX 模型加载失败",
+            }
+        prompt = build_classify_prompt(classify_text_for_prompt, l2_map, examples, country=country)
+        try:
+            raw = _mlx_generate(prompt, max_tokens=QWEN_CLASSIFY_NUM_PREDICT)
+            obj = extract_json_object(raw)
+            processed = _post_process_classify_result(
+                obj,
+                text,
+                l2_map,
+                model=mlx_model_name,
+                match_type="mlx_14b_lora",
+            )
+        except Exception as e:
+            return {
+                "l1": "",
+                "l2": "",
+                "l3": "",
+                "keywords": [],
+                "risk_level": "低",
+                "confidence": 0.0,
+                "match_type": "mlx_failed",
+                "model": mlx_model_name,
+                "cache_hit": False,
+                "needs_review": True,
+                "error": str(e)[:300],
+            }
+        if processed is not None:
+            return processed
+        raw_l1 = str(obj.get("l1") or obj.get("一级标签") or "").strip()
+        raw_l2 = str(obj.get("l2") or obj.get("二级标签") or "").strip()
+        return {
+            "l1": "",
+            "l2": "",
+            "l3": "",
+            "keywords": [],
+            "risk_level": "低",
+            "confidence": 0.0,
+            "match_type": "mlx_rejected",
+            "model": mlx_model_name,
+            "cache_hit": False,
+            "needs_review": True,
+            "error": "白名单校验未通过",
+            "raw_model_l1": raw_l1[:120],
+            "raw_model_l2": raw_l2[:120],
+        }
+
     extra = json.dumps({"l2": l2_map, "examples": examples, "country": country}, ensure_ascii=False)
     key = _cache_key("classify_v12_m4b_r4", text, extra)
     cached = _cache_get(key)
@@ -2118,8 +2319,14 @@ def classify_text(text: str, *, db_path: str, country: str = "", model: str = QW
 
     raw_l1 = str(obj.get("l1") or obj.get("一级标签") or "").strip()
     raw_l2 = str(obj.get("l2") or obj.get("二级标签") or "").strip()
-    wl1, wl2 = _strict_whitelist_l1_l2(raw_l1, raw_l2, l2_map)
-    if wl1 is None or wl2 is None:
+    processed = _post_process_classify_result(
+        obj,
+        text,
+        l2_map,
+        model=model,
+        match_type="qwen14b_structured",
+    )
+    if processed is None:
         return {
             "l1": "",
             "l2": "",
@@ -2134,69 +2341,8 @@ def classify_text(text: str, *, db_path: str, country: str = "", model: str = QW
             "raw_model_l1": raw_l1[:120],
             "raw_model_l2": raw_l2[:120],
         }
-
-    keywords = obj.get("问题关键词") or obj.get("keywords") or []
-    if isinstance(keywords, str):
-        keywords = [x.strip() for x in keywords.split(",") if x.strip()]
-    if not isinstance(keywords, list):
-        keywords = []
-    risk = str(obj.get("风险等级") or obj.get("risk_level") or "低").strip()
-    if risk not in ("高", "中", "低"):
-        risk = "低"
-    conf = float(obj.get("confidence") or 0.75)
-
-    l1, l2, rule_flags = apply_classification_post_rules(text, wl1, wl2, l2_map)
-    guard = bool(rule_flags.get("non_issue_guard"))
-    if guard:
-        conf = max(conf, 0.82)
-    if rule_flags.get("consult_misclass"):
-        conf = min(conf, 0.45)
-    if rule_flags.get("charging_guard"):
-        conf = max(conf, 0.84)
-    if rule_flags.get("srv_quality_guard"):
-        conf = max(conf, 0.83)
-    if rule_flags.get("pos_captured"):
-        conf = max(conf, 0.86)
-
-    consult_misclass = bool(rule_flags.get("consult_misclass"))
-    pos_captured = bool(rule_flags.get("pos_captured"))
-    charging_guard = bool(rule_flags.get("charging_guard"))
-    srv_quality_guard = bool(rule_flags.get("srv_quality_guard"))
-
-    out = {
-        "l1": l1,
-        "l2": l2,
-        "l3": "",
-        "keywords": [str(x).strip() for x in keywords if str(x).strip()][:12],
-        "risk_level": risk,
-        "confidence": conf,
-        "match_type": "qwen14b_structured",
-        "model": model,
-        "cache_hit": False,
-        "needs_review": consult_misclass,
-    }
-    if guard:
-        out["non_issue_guard"] = True
-    if consult_misclass:
-        out["l2_consult_guard"] = True
-        out["raw_model_l2"] = wl2[:120]
-    if pos_captured:
-        out["positive_capture"] = True
-        out["raw_model_l1"] = wl1[:120]
-        out["raw_model_l2"] = wl2[:120]
-    if charging_guard:
-        out["charging_domain_guard"] = True
-        out["raw_model_l1"] = wl1[:120]
-        out["raw_model_l2"] = wl2[:120]
-    if srv_quality_guard:
-        out["srv_quality_guard"] = True
-        out["raw_model_l1"] = wl1[:120]
-        out["raw_model_l2"] = wl2[:120]
-    l1, l2 = strip_non_issue_l2(l1, l2)
-    out["l1"] = l1
-    out["l2"] = l2
-    _cache_set(key, out)
-    return out
+    _cache_set(key, processed)
+    return processed
 
 
 def build_classify_prompt(text: str, l2_map: Dict[str, List[str]], examples: List[Dict[str, str]], *, country: str = "") -> str:
