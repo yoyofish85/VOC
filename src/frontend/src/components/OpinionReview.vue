@@ -177,7 +177,7 @@
         type="primary"
         size="large"
         class="btn-confirm-archive"
-        :disabled="!selectedBatch"
+        :disabled="!selectedBatch || batchConfirmLoading"
         :loading="batchConfirmLoading"
         @click="confirmWholeBatch"
       >
@@ -187,7 +187,7 @@
         plain
         :disabled="!selectedRows.length"
         :loading="batchConfirmLoading"
-        @click="batchConfirmReview"
+        @click="confirmSelectedRows"
       >
         仅确认所选（不写年度CSV）({{ selectedRows.length }})
       </el-button>
@@ -207,7 +207,7 @@
       </el-button>
       <el-button :disabled="!selectedBatch" @click="exportCsv">导出当前批次 CSV</el-button>
       <span class="batch-hint"
-        >「确认整批 + 归档年度数据」将确认本导入批次内<strong>全部</strong>已分类/已填标签的反馈（不受当前页 20 条限制），回流清洗库并即时写入年度 CSV；批次全部复核完成后自动升级归档标记。「仅确认所选」只处理勾选行且不写年度 CSV。</span
+        >「确认整批 + 归档年度数据」将对本导入批次内<strong>全部</strong>已填标签的反馈执行整批复核、回流清洗库并写入年度 CSV。「仅确认所选」只处理勾选行且不写年度 CSV。</span
       >
     </div>
 
@@ -1450,8 +1450,11 @@ const matchTypeLabel = (mt) => {
     exact: '精确',
     fuzzy: '模糊',
     generic_l3: '通用·三级',
-    generic: '通用'
+    generic: '通用',
+    gold_review: '金标',
+    mlx_14b_lora: 'MLX·14B微调'
   }
+  if (!m[mt] && mt && mt.startsWith('mlx_')) return 'MLX·14B微调'
   return m[mt] || mt || '—'
 }
 
@@ -1564,7 +1567,7 @@ const confirmWholeBatch = async () => {
   }
 }
 
-const batchConfirmReview = async () => {
+const confirmSelectedRows = async () => {
   if (!selectedRows.value.length) return
   // 先落库所有防抖中的行内编辑，避免确认后又被旧的自动保存覆盖。
   await flushPendingRowSaves()

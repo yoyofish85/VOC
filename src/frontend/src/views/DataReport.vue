@@ -61,7 +61,7 @@
             <ul>
               <li v-for="x in summaryData.top_issues || []" :key="x.label">
                 {{ x.label }}（{{ x.count }}）
-                <span v-if="x.trend" class="trend-tag">{{ x.trend }}</span>
+                <span v-if="x.trend" :class="['trend-tag', trendTagClass(x.trend)]">{{ x.trend }}</span>
                 ：{{ x.analysis }}
               </li>
             </ul>
@@ -221,6 +221,14 @@ const scheduleLoad = () => {
 
 const regionLabelZh = () =>
   ({ all: '全部区域', cn: '中国', rest: '中国以外（全球其他）' }[region.value] || '全部区域')
+
+const trendTagClass = (trend) => {
+  const text = String(trend || '')
+  if (text.includes('↑')) return 'trend-tag-up'
+  if (text.includes('↓')) return 'trend-tag-down'
+  if (text.includes('→')) return 'trend-tag-flat'
+  return ''
+}
 
 const baseDark = () => ({
   backgroundColor: 'transparent',
@@ -671,7 +679,7 @@ watch([dateFrom, dateTo], () => scheduleLoad())
 
 onMounted(() => {
   window.addEventListener('resize', onResize)
-  nextTick(() => loadAll())
+  nextTick(() => loadAll(true))
 })
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
@@ -803,43 +811,71 @@ onUnmounted(() => {
   border-color: rgba(238, 202, 31, 0.38);
 }
 .summary-main {
-  margin: 8px 0 12px;
+  margin: 0 0 12px;
+  padding: 12px 16px;
+  border-left: 3px solid #409eff;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.68);
   color: #e5e7eb;
+  font-size: 15px;
   line-height: 1.7;
 }
 .summary-volume {
-  margin-bottom: 10px;
-  color: #94a3b8;
-  font-size: 13px;
-}
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
   color: #cbd5e1;
   font-size: 13px;
 }
+.summary-volume span:first-child {
+  color: #f8fafc;
+  font-weight: 600;
+}
+.summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+.summary-grid > div {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.42);
+}
 .summary-grid ul {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   padding-left: 18px;
 }
 .summary-grid li {
-  margin-bottom: 5px;
+  margin-bottom: 4px;
 }
 .summary-subtitle {
-  color: #facc15;
+  margin-bottom: 6px;
+  color: #f8fafc;
+  font-size: 14px;
   font-weight: 600;
 }
-.summary-trends,
+.summary-trends {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: rgba(14, 165, 233, 0.12);
+  color: #cbd5e1;
+  font-size: 13px;
+}
+.summary-trends ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.summary-trends li {
+  margin-bottom: 4px;
+}
 .summary-quotes {
   margin-top: 12px;
   color: #cbd5e1;
   font-size: 13px;
-}
-.summary-trends ul,
-.summary-quotes ul {
-  margin: 6px 0 0;
-  padding-left: 18px;
 }
 .quote-item {
   margin-top: 8px;
@@ -864,8 +900,21 @@ onUnmounted(() => {
 }
 .trend-tag {
   margin-left: 4px;
-  color: #60a5fa;
+  padding: 1px 6px;
+  border-radius: 4px;
   font-size: 11px;
+}
+.trend-tag-up {
+  background: rgba(245, 108, 108, 0.15);
+  color: #fca5a5;
+}
+.trend-tag-down {
+  background: rgba(103, 194, 58, 0.16);
+  color: #86efac;
+}
+.trend-tag-flat {
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
 }
 .ppt-text {
   margin-top: 12px;
@@ -874,5 +923,10 @@ onUnmounted(() => {
   background: rgba(30, 41, 59, 0.55);
   color: #dbeafe;
   line-height: 1.65;
+}
+@media (max-width: 768px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
