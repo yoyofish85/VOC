@@ -122,6 +122,79 @@ def test_partial_confirm_writes_annual_csv(archive_client) -> None:
     assert _reflow_synced(main_mod, "BATCH_P_000") == 1
 
 
+def test_confirm_and_write_csv_updates_total_without_batch_overwrite(archive_client) -> None:
+    """按批次确认归档时，总 CSV 应保留全部已确认行，而不是被当前批次覆盖。"""
+    client, main_mod, annual_dir, _ = archive_client
+    _seed_batch(main_mod, "BATCH_CSV_A", 1)
+    _seed_batch(main_mod, "BATCH_CSV_B", 1)
+    main_mod.execute_db(
+        "UPDATE opinion SET match_score = 0.88 WHERE opinion_id = ?",
+        ["BATCH_CSV_A_000"],
+    )
+
+    first = client.post(
+        "/api/confirm_and_write_csv",
+        json={
+            "reviews": [{"opinion_id": "BATCH_CSV_A_000", "review_l1": "产品质量类", "review_l2": "车机"}],
+            "reviewer": "pytest",
+            "upload_batch": "BATCH_CSV_A",
+        },
+    ).json()
+    assert first.get("code") == 200, first
+    assert _annual_total_rows(annual_dir) == 1
+
+    second = client.post(
+        "/api/confirm_and_write_csv",
+        json={
+            "reviews": [{"opinion_id": "BATCH_CSV_B_000", "review_l1": "产品质量类", "review_l2": "车机"}],
+            "reviewer": "pytest",
+            "upload_batch": "BATCH_CSV_B",
+        },
+    ).json()
+    assert second.get("code") == 200, second
+    rows = _annual_rows(annual_dir)
+    assert [r["舆情编号"] for r in rows] == ["BATCH_CSV_A_000", "BATCH_CSV_B_000"]
+    assert "关键词" in rows[0]
+    assert "三级标签" not in rows[0]
+    assert "置信度" in rows[0]
+    assert rows[0]["置信度"] == "0.88"
+
+
+def test_confirm_and_write_csv_rejects_empty_reviews(archive_client) -> None:
+    """confirm_and_write_csv 空 reviews 应返回 400。"""
+    client, _main_mod, _annual_dir, _ = archive_client
+    r = client.post("/api/confirm_and_write_csv", json={"reviews": [], "upload_batch": "BATCH_EMPTY"})
+    assert r.status_code == 200
+    assert r.json().get("code") == 400
+
+
+def test_batch_status_reports_completion_and_l1_accuracy(archive_client) -> None:
+    """batch_status 返回批次完成状态与已确认行 L1 准确率。"""
+    client, main_mod, _annual_dir, _ = archive_client
+    _seed_batch(main_mod, "BATCH_STATUS", 3)
+    main_mod.execute_db(
+        "UPDATE opinion SET v3_l1 = ?, v3_l2 = ? WHERE upload_batch = ?",
+        ["产品质量类", "车机", "BATCH_STATUS"],
+    )
+    main_mod.execute_db(
+        "UPDATE opinion SET review_status = 1, review_l1 = ?, review_l2 = ? WHERE opinion_id IN (?, ?)",
+        ["产品质量类", "车机", "BATCH_STATUS_000", "BATCH_STATUS_001"],
+    )
+    main_mod.execute_db(
+        "UPDATE opinion SET review_l1 = ? WHERE opinion_id = ?",
+        ["服务类", "BATCH_STATUS_001"],
+    )
+
+    body = client.post("/api/batch_status", json={"upload_batch": "BATCH_STATUS"}).json()
+    assert body.get("code") == 200, body
+    assert body["batch_total"] == 3
+    assert body["confirmed"] == 2
+    assert body["unconfirmed"] == 1
+    assert body["is_complete"] is False
+    assert body["accuracy_l1_pct"] == 50.0
+    assert body["accuracy_l1_detail"] == "1/2"
+
+
 def test_confirm_batch_confirms_all_rows_beyond_page(archive_client) -> None:
     """整批确认应处理全部行（25 > 单页 20），全部写入年度 CSV，整批完成升级为 reflow_synced=2。"""
     client, main_mod, annual_dir, _ = archive_client

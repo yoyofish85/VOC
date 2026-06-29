@@ -2558,28 +2558,39 @@ def _apply_yearly_archive_for_batch(upload_batch: str, reviewer: str) -> Dict[st
 
 
 def _write_yearly_csv_to_disk(upload_batch: Optional[str] = None) -> str:
-    """写入年度汇总 CSV（优先使用人工复核后的一二级 + 系统提取关键词作三级）。"""
-    wc = "WHERE review_status = 1"
-    pr: List = []
-    if upload_batch:
-        wc += " AND upload_batch = ?"
-        pr.append(upload_batch)
-    summary_sql = f'''SELECT opinion_id as 舆情编号, original_text as 舆情中文, source as 渠道, create_time as 舆情时间,
+    """写入年度汇总 CSV。
+
+    指定 upload_batch 时只刷新对应批次的年度 CSV；总 CSV 始终从全部已复核行全量刷新，
+    避免批次归档覆盖「年度数据总和.CSV」。
+    """
+    summary_select = '''SELECT opinion_id as 舆情编号, original_text as 舆情中文, source as 渠道, create_time as 舆情时间,
         COALESCE(NULLIF(review_l1, ''), model_class) as 一级标签,
         COALESCE(NULLIF(review_l2, ''),
             CASE WHEN INSTR(model_keyword, ',') > 0 THEN TRIM(SUBSTR(model_keyword, 1, INSTR(model_keyword, ',') - 1))
             ELSE TRIM(model_keyword) END) as 二级标签,
         COALESCE(NULLIF(extracted_keywords, ''),
-            CASE WHEN INSTR(model_keyword, ',') > 0 THEN TRIM(SUBSTR(model_keyword, INSTR(model_keyword, ',') + 1)) ELSE '' END) as 三级标签,
+            CASE WHEN INSTR(model_keyword, ',') > 0 THEN TRIM(SUBSTR(model_keyword, INSTR(model_keyword, ',') + 1)) ELSE '' END) as 关键词,
         COALESCE(country, '') as 国家, COALESCE(phone, '') as 手机号, COALESCE(vin, '') as VIN, COALESCE(car_model, '') as 车型,
+        COALESCE(v3_confidence, match_score, '') as 置信度,
         '已复核' as 复核状态, COALESCE(review_note, '未填写') as 复核备注,
         SUBSTR(create_time, 1, 4) as 年度, SUBSTR(create_time, 1, 7) as 年月,
         COALESCE(reviewer, '') as 复核人, COALESCE(reviewed_at, '') as 复核时间
-        FROM opinion {wc} ORDER BY create_time ASC, opinion_id ASC'''
-    data = query_db(summary_sql, pr)
+        FROM opinion {where_sql} ORDER BY create_time ASC, opinion_id ASC'''
+
+    def _query_yearly_rows(batch: Optional[str] = None) -> List[Dict[str, Any]]:
+        wc = "WHERE review_status = 1"
+        pr: List[Any] = []
+        if batch:
+            wc += " AND upload_batch = ?"
+            pr.append(batch)
+        return query_db(summary_select.format(where_sql=wc), pr)
+
+    data = _query_yearly_rows(upload_batch)
+    all_data = _query_yearly_rows(None)
     fieldnames = [
-        "舆情编号", "舆情中文", "渠道", "舆情时间", "一级标签", "二级标签", "三级标签",
-        "国家", "手机号", "VIN", "车型", "复核状态", "复核备注", "年度", "年月", "复核人", "复核时间",
+        "舆情编号", "舆情中文", "渠道", "舆情时间", "一级标签", "二级标签", "关键词",
+        "国家", "手机号", "VIN", "车型", "置信度", "复核状态", "复核备注",
+        "年度", "年月", "复核人", "复核时间",
     ]
     annual_dir = os.path.join(str(ANNUAL_DIR))
     os.makedirs(annual_dir, exist_ok=True)
@@ -2599,7 +2610,7 @@ def _write_yearly_csv_to_disk(upload_batch: Optional[str] = None) -> str:
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(data)
+        writer.writerows(all_data)
     return csv_path
 
 
@@ -2829,6 +2840,96 @@ async def confirm_review_api(request: Request):
     }
     out.update(yearly_data)
     return out
+
+
+@app.post("/api/confirm_and_write_csv")
+async def confirm_and_write_csv_api(request: Request):
+    """确认所选复核结果，并立即刷新年度 CSV（批次年度文件 + 总 CSV）。"""
+    data = await request.json()
+    reviews = data.get("reviews")
+    if not reviews or not isinstance(reviews, list):
+        return {"code": 400, "msg": "需要 reviews 数组"}
+    reviewer = (data.get("reviewer") or "").strip()
+    upload_batch = (data.get("upload_batch") or "").strip()
+
+    try:
+        rows_for_reflow, confirmed = _write_confirm_reviews(reviews, reviewer, with_reflow=True)
+    except Exception as e:
+        logger.exception("confirm_and_write_csv 事务失败: %s", e)
+        return {"code": 500, "msg": f"确认保存失败：{e}", "confirmed": 0}
+
+    csv_written = ""
+    if confirmed > 0:
+        try:
+            with _YEARLY_CSV_LOCK:
+                csv_written = _write_yearly_csv_to_disk(upload_batch=upload_batch or None)
+            logger.info("年度 CSV 已更新: %s（确认 %d 条）", csv_written, confirmed)
+        except Exception as e:
+            logger.exception("写入年度 CSV 失败: %s", e)
+            return {
+                "code": 500,
+                "msg": f"已确认 {confirmed} 条，但写入年度 CSV 失败：{e}",
+                "confirmed": confirmed,
+                "csv_path": "",
+            }
+
+    if rows_for_reflow:
+        _reflow_rows_background(rows_for_reflow, reviewer, "confirm_csv")
+
+    return {
+        "code": 200,
+        "msg": f"已确认 {confirmed} 条，年度 CSV 已更新" + (f": {csv_written}" if csv_written else ""),
+        "confirmed": confirmed,
+        "csv_path": csv_written,
+    }
+
+
+@app.post("/api/batch_status")
+async def batch_status_api(request: Request):
+    """检查批次完成状态，并计算已确认行的 L1 准确率。"""
+    data = await request.json()
+    upload_batch = (data.get("upload_batch") or "").strip()
+    if not upload_batch:
+        return {"code": 400, "msg": "需要 upload_batch"}
+
+    total_row = query_db(
+        "SELECT COUNT(*) as cnt FROM opinion WHERE upload_batch = ?",
+        [upload_batch],
+        fetch_all=False,
+    ) or {"cnt": 0}
+    confirmed_row = query_db(
+        "SELECT COUNT(*) as cnt FROM opinion WHERE upload_batch = ? AND review_status = 1",
+        [upload_batch],
+        fetch_all=False,
+    ) or {"cnt": 0}
+    batch_total = int(total_row.get("cnt") or 0)
+    confirmed = int(confirmed_row.get("cnt") or 0)
+    unconfirmed = max(batch_total - confirmed, 0)
+
+    rows = query_db(
+        """SELECT review_l1, v3_l1 FROM opinion
+        WHERE upload_batch = ? AND review_status = 1
+        AND review_l1 IS NOT NULL AND TRIM(review_l1) != ''
+        AND v3_l1 IS NOT NULL AND TRIM(v3_l1) != ''""",
+        [upload_batch],
+    )
+    acc_correct = sum(
+        1
+        for r in rows
+        if str(r.get("review_l1") or "").strip() == str(r.get("v3_l1") or "").strip()
+    )
+    acc_total = len(rows)
+    acc_pct = round(acc_correct / max(acc_total, 1) * 100, 2)
+
+    return {
+        "code": 200,
+        "is_complete": unconfirmed == 0,
+        "batch_total": batch_total,
+        "confirmed": confirmed,
+        "unconfirmed": unconfirmed,
+        "accuracy_l1_pct": acc_pct,
+        "accuracy_l1_detail": f"{acc_correct}/{acc_total}",
+    }
 
 
 def _effective_review_labels_from_row(row: dict) -> Tuple[str, str]:

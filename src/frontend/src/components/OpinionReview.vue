@@ -177,19 +177,20 @@
         type="primary"
         size="large"
         class="btn-confirm-archive"
-        :disabled="!selectedBatch || batchConfirmLoading"
-        :loading="batchConfirmLoading"
-        @click="confirmWholeBatch"
-      >
-        确认整批 + 归档年度数据
-      </el-button>
-      <el-button
-        plain
         :disabled="!selectedRows.length"
         :loading="batchConfirmLoading"
-        @click="confirmSelectedRows"
+        @click="confirmWriteArchive"
       >
-        仅确认所选（不写年度CSV）({{ selectedRows.length }})
+        确认归档 ({{ selectedRows.length }})
+      </el-button>
+      <el-button
+        type="success"
+        size="large"
+        :disabled="!selectedBatch"
+        :loading="batchStatusLoading"
+        @click="checkBatchArchive"
+      >
+        归档年度数据
       </el-button>
       <el-button
         type="info"
@@ -207,7 +208,7 @@
       </el-button>
       <el-button :disabled="!selectedBatch" @click="exportCsv">导出当前批次 CSV</el-button>
       <span class="batch-hint"
-        >「确认整批 + 归档年度数据」将对本导入批次内<strong>全部</strong>已填标签的反馈执行整批复核、回流清洗库并写入年度 CSV。「仅确认所选」只处理勾选行且不写年度 CSV。</span
+        >「确认归档」将当前勾选的 {{ selectedRows.length }} 行确认并写入年度 CSV。「归档年度数据」检查整批完成状态并显示批次准确率。</span
       >
     </div>
 
@@ -486,8 +487,8 @@ import {
   getTaxonomyOptionsApi,
   exportReviewsCsvApi,
   confirmReviewApi,
-  confirmReviewBatchApi,
-  confirmReviewBatchPreviewApi,
+  confirmAndWriteCsvApi,
+  batchStatusApi,
   previewKeywordsApi,
   listAnnualCsvApi,
   getL2ByL1Api
@@ -532,6 +533,7 @@ const yearOptions = ref(['2024', '2025', '2026'])
 const summaryYearFilter = ref('')
 const summaryMonthPicker = ref('')
 const batchConfirmLoading = ref(false)
+const batchStatusLoading = ref(false)
 const draftSaveLoading = ref(false)
 const classifyProgressText = ref('')
 /** 后台分类任务：非阻塞轮询（避免 await 长链占用 async 调用栈） */
@@ -1494,80 +1496,7 @@ const batchSaveReviews = async () => {
   }
 }
 
-const confirmWholeBatch = async () => {
-  if (!selectedBatch.value) {
-    ElMessage.warning('请先选择导入批次')
-    return
-  }
-  await flushPendingRowSaves()
-  batchConfirmLoading.value = true
-  try {
-    const preview = await confirmReviewBatchPreviewApi({ upload_batch: selectedBatch.value })
-    if (preview.code !== 200) {
-      ElMessage.error(preview.msg || '无法预览批次状态')
-      return
-    }
-    if (preview.unreviewed_count > 0) {
-      showBatchUnreviewedInList(preview)
-      await ElMessageBox.alert(
-        `批次「${selectedBatch.value}」尚有 ${preview.unreviewed_count} 条未就绪，无法整批确认。\n\n` +
-          `可确认：${preview.confirmable_count} 条 · 已复核：${preview.already_confirmed_count} 条\n\n` +
-          '未就绪条目已在下方详情列表筛选显示，请补全一级/二级标签后重试。',
-        '存在未复核/未就绪条目',
-        { type: 'warning', confirmButtonText: '我知道了' }
-      )
-      return
-    }
-    if (preview.all_done) {
-      ElMessage.info(preview.msg || '该批次已全部复核完成')
-      return
-    }
-    if (!preview.confirmable_count) {
-      ElMessage.warning('该批次没有可确认的条目')
-      return
-    }
-    try {
-      await ElMessageBox.confirm(
-        `将对批次「${selectedBatch.value}」内 ${preview.confirmable_count} 条待确认反馈执行整批复核、回流清洗库并写入年度 CSV。是否继续？`,
-        '确认整批 + 归档',
-        { type: 'warning', confirmButtonText: '确认整批', cancelButtonText: '取消' }
-      )
-    } catch {
-      return
-    }
-    ElMessage.info('正在整批确认、回流并写入年度数据…')
-    const res = await confirmReviewBatchApi({
-      upload_batch: selectedBatch.value,
-      reviewer: reviewerName.value,
-      with_reflow: true,
-      also_yearly: true
-    })
-    if (res.code === 200) {
-      clearBatchUnreviewedFilter()
-      ElNotification({
-        title: '整批确认与归档',
-        message: res.msg || `已整批确认 ${res.confirmed ?? 0} 条`,
-        type: 'success',
-        duration: 7000
-      })
-      selectedRows.value = []
-      await getReviewList()
-      getYearlySummary()
-      emit('refresh')
-    } else if (res.code === 409 && res.unreviewed?.length) {
-      showBatchUnreviewedInList(res)
-      ElMessage.warning(res.msg || '存在未就绪条目，已暂停整批确认')
-    } else {
-      ElMessage.error(res.msg || '整批确认失败')
-    }
-  } catch {
-    ElMessage.error('请求失败')
-  } finally {
-    batchConfirmLoading.value = false
-  }
-}
-
-const confirmSelectedRows = async () => {
+const confirmWriteArchive = async () => {
   if (!selectedRows.value.length) return
   // 先落库所有防抖中的行内编辑，避免确认后又被旧的自动保存覆盖。
   await flushPendingRowSaves()
@@ -1586,31 +1515,23 @@ const confirmSelectedRows = async () => {
   const nConfirm = selectedRows.value.length
   batchConfirmLoading.value = true
   try {
-    ElMessage.info('正在确认所选并回流（不写年度 CSV）…')
-    const res = await confirmReviewApi({
+    ElMessage.info('正在确认归档并写入年度 CSV…')
+    const res = await confirmAndWriteCsvApi({
       reviews: selectedRows.value.map((row) => ({
         opinion_id: row.opinion_id,
         review_l1: (row.review_l1 || '').trim(),
         review_l2: (row.review_l2 || '').trim(),
         review_note: row.review_note
       })),
-      reviewer: reviewerName.value,
-      with_reflow: true,
-      also_yearly: false,
-      write_yearly: false
+      reviewer: reviewerName.value || undefined,
+      upload_batch: selectedBatch.value || undefined
     })
     if (res.code === 200) {
-      let detail = res.reflow_async
-        ? `成功确认所选 ${nConfirm} 条；清洗库回流已在后台执行。全量保存请点击「确认整批 + 归档年度数据」。`
-        : `成功确认所选 ${nConfirm} 条；未写年度 CSV。全量保存请点击「确认整批 + 归档年度数据」。`
-      if (res.reflow_async && res.msg) {
-        detail = res.msg
-      }
       ElNotification({
-        title: '确认所选',
-        message: detail,
+        title: '确认归档',
+        message: res.msg || `已确认 ${res.confirmed || nConfirm} 条，年度 CSV 已更新。`,
         type: 'success',
-        duration: 6500
+        duration: 5000
       })
       selectedRows.value = []
       await getReviewList()
@@ -1621,6 +1542,41 @@ const confirmSelectedRows = async () => {
     ElMessage.error('请求失败')
   } finally {
     batchConfirmLoading.value = false
+  }
+}
+
+const checkBatchArchive = async () => {
+  if (!selectedBatch.value) {
+    ElMessage.warning('请先选择批次')
+    return
+  }
+  batchStatusLoading.value = true
+  try {
+    const res = await batchStatusApi({ upload_batch: selectedBatch.value })
+    if (res.code !== 200) {
+      ElMessage.error(res.msg || '查询失败')
+      return
+    }
+    await ElMessageBox.alert(
+      [
+        `批次：${selectedBatch.value}`,
+        `总数：${res.batch_total} 条`,
+        `已确认：${res.confirmed} 条`,
+        `待确认：${res.unconfirmed} 条`,
+        `状态：${res.is_complete ? '全部完成' : '尚未完成'}`,
+        `本批次 L1 准确率：${res.accuracy_l1_pct}%（${res.accuracy_l1_detail}）`,
+        !res.is_complete ? `提示：确认全部 ${res.batch_total} 条后，准确率达最终值。` : ''
+      ].filter(Boolean).join('\n'),
+      '归档年度数据',
+      {
+        confirmButtonText: '知道了',
+        type: res.is_complete ? 'success' : 'warning'
+      }
+    )
+  } catch {
+    // 用户关闭弹窗或网络异常；网络异常由拦截器转换为 code != 200 的响应。
+  } finally {
+    batchStatusLoading.value = false
   }
 }
 

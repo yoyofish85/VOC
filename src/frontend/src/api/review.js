@@ -98,6 +98,12 @@ export const getYearlySummaryApi = (params) => request.get('/get_yearly_summary'
 
 export const confirmReviewApi = (data) => request.post('/confirm_review', data, { timeout: 120000 });
 
+/** 确认所选行并写入年度 CSV */
+export const confirmAndWriteCsvApi = (data) => request.post('/api/confirm_and_write_csv', data, { timeout: 120000 });
+
+/** 查询批次完成状态与准确率 */
+export const batchStatusApi = (data) => request.post('/api/batch_status', data, { timeout: 30000 });
+
 /** 整批确认：对某导入批次内全部已可确认的行一次性确认（不受分页 20 条限制） */
 export const confirmReviewBatchApi = (data) => request.post('/confirm_review_batch', data, { timeout: 180000 });
 
