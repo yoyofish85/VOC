@@ -57,9 +57,25 @@ def test_post_process_whitelist_reject():
     assert result is None
 
 
+@patch("qwen_ollama._extract_l3_phrases")
+def test_post_process_mlx_adds_l3_phrases(mock_extract, monkeypatch):
+    """MLX 模式下后处理结果应包含 L3 具体问题短语。"""
+    from qwen_ollama import _post_process_classify_result
+
+    monkeypatch.setenv("VOC_USE_MLX", "1")
+    mock_extract.return_value = "车机黑屏,重启无效"
+    obj = {"l1": "产品质量类", "l2": "车机问题"}
+    l2_map = {"产品质量类": ["车机问题"]}
+    result = _post_process_classify_result(obj, "车机黑屏了，重启也不行", l2_map, match_type="mlx_14b_lora")
+    assert result is not None
+    assert result["l3_phrases"] == "车机黑屏,重启无效"
+    mock_extract.assert_called_once()
+
+
+@patch("qwen_ollama._extract_l3_phrases")
 @patch("qwen_ollama._mlx_model_load")
 @patch("qwen_ollama._mlx_generate")
-def test_classify_text_mlx_success(mock_gen, mock_load, monkeypatch):
+def test_classify_text_mlx_success(mock_gen, mock_load, mock_extract, monkeypatch):
     """classify_text 在 VOC_USE_MLX=1 时走 MLX 路径并返回正确结果。"""
     import qwen_ollama as qo
 
@@ -67,6 +83,7 @@ def test_classify_text_mlx_success(mock_gen, mock_load, monkeypatch):
     monkeypatch.setenv("VOC_MLX_MODEL", "mlx-test-model")
     mock_load.return_value = True
     mock_gen.return_value = '{"l1": "产品质量类", "l2": "车机问题"}'
+    mock_extract.return_value = "车机黑屏"
     with (
         patch("qwen_ollama.load_l2_whitelist", return_value={"产品质量类": ["车机问题"]}),
         patch("qwen_ollama.historical_examples", return_value=[]),
@@ -77,6 +94,7 @@ def test_classify_text_mlx_success(mock_gen, mock_load, monkeypatch):
     assert result.get("l2") == "车机问题"
     assert result.get("match_type") == "mlx_14b_lora"
     assert result.get("model") == "mlx-test-model"
+    assert result.get("l3_phrases") == "车机黑屏"
     assert result.get("cache_hit") is False
     mock_load.assert_called_once()
     mock_gen.assert_called_once()

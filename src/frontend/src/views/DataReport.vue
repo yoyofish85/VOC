@@ -89,6 +89,51 @@
         <div class="ppt-text">{{ summaryData.ppt_text }}</div>
       </div>
 
+      <div class="lotus-card lotus-card-wide weekly-card">
+        <div class="lotus-card-head">
+          <div>
+            <div class="lotus-card-title">周报 · Weekly Report</div>
+            <div class="lotus-card-title-en">自动汇总 · 最近 12 期历史可切换</div>
+          </div>
+          <div class="weekly-actions">
+            <el-select
+              v-model="selectedWeek"
+              placeholder="选择周报"
+              size="small"
+              clearable
+              style="width: 220px"
+              @change="loadWeeklyReport"
+            >
+              <el-option v-for="r in weeklyReportList" :key="r.week" :label="r.week" :value="r.week" />
+            </el-select>
+            <el-button size="small" type="primary" :loading="weeklyGenerating" @click="generateWeekly">
+              生成本周周报
+            </el-button>
+          </div>
+        </div>
+        <div v-if="weeklyData" class="weekly-body">
+          <p class="summary-main">{{ weeklyData.summary }}</p>
+          <div v-if="weeklyData.volume" class="summary-volume">
+            <span>本周 {{ weeklyData.volume.total || weeklyData.total || 0 }} 条</span>
+            <span v-if="weeklyData.date_from && weeklyData.date_to">周期 {{ weeklyData.date_from }} 至 {{ weeklyData.date_to }}</span>
+          </div>
+          <div v-if="(weeklyData.top_issues || []).length" class="weekly-section">
+            <div class="summary-subtitle">Top 问题</div>
+            <ul>
+              <li v-for="x in weeklyData.top_issues" :key="x.label">{{ x.label }}（{{ x.count }}）：{{ x.analysis }}</li>
+            </ul>
+          </div>
+          <div v-if="(weeklyData.representative_quotes || []).length" class="summary-quotes">
+            <div class="summary-subtitle">代表性原文</div>
+            <div v-for="q in weeklyData.representative_quotes" :key="q.issue + q.quote" class="quote-item">
+              <div class="quote-issue">{{ q.issue }}（{{ q.count }}条）</div>
+              <div class="quote-text">「{{ q.quote }}」</div>
+            </div>
+          </div>
+        </div>
+        <el-empty v-else description="暂无周报，点击生成本周周报" :image-size="64" />
+      </div>
+
       <div class="lotus-card">
         <div class="lotus-card-head">
           <div>
@@ -164,6 +209,27 @@
         </div>
         <div ref="chartRef3" class="lotus-echart lotus-echart-tall" />
       </div>
+
+      <div class="lotus-card lotus-card-wide" v-if="issueStatus.length">
+        <div class="lotus-card-head">
+          <div>
+            <div class="lotus-card-title">问题处理状态 · Issue Status</div>
+            <div class="lotus-card-title-en">按二级标签聚合处理进度</div>
+          </div>
+        </div>
+        <el-table :data="issueStatus" stripe size="small" class="issue-status-table">
+          <el-table-column prop="l2" label="二级标签" min-width="180" />
+          <el-table-column prop="total" label="总数" width="80" />
+          <el-table-column prop="resolved" label="已处理" width="90" />
+          <el-table-column prop="in_progress" label="处理中" width="90" />
+          <el-table-column prop="pending" label="未处理" width="90" />
+          <el-table-column label="处理率" min-width="180">
+            <template #default="scope">
+              <el-progress :percentage="issueResolvedPct(scope.row)" />
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
     </div>
   </div>
 </template>
@@ -178,7 +244,11 @@ import {
   getTopSubtagMonthlyApi,
   getSingleIssueTrendApi,
   getOpinionSummaryApi,
-  getL2ByL1Api
+  getL2ByL1Api,
+  reportWeeklyReportsApi,
+  reportWeeklyReportApi,
+  reportGenerateWeeklyApi,
+  reportIssueStatusApi
 } from '@/api/review'
 
 const chartRef1 = ref(null)
@@ -209,6 +279,11 @@ const issueL2Options = ref([])
 const issueLoading = ref(false)
 const singleIssueActive = ref(false)
 const latestTopData = ref(null)
+const weeklyReportList = ref([])
+const selectedWeek = ref('')
+const weeklyData = ref(null)
+const weeklyGenerating = ref(false)
+const issueStatus = ref([])
 
 let loadTimer = null
 const scheduleLoad = () => {
@@ -288,9 +363,68 @@ async function loadAll (forceRefresh = false) {
     renderSubTrend(s.data)
     latestTopData.value = t.data
     renderTopOrIssue(t.data)
+    loadIssueStatus()
   } catch (e) {
     console.error(e)
     ElMessage.error(e.message || '加载失败 / Load failed')
+  }
+}
+
+const issueResolvedPct = (row) => Math.round(((row?.resolved || 0) / Math.max(row?.total || 0, 1)) * 100)
+
+async function loadIssueStatus () {
+  try {
+    const res = await reportIssueStatusApi('')
+    issueStatus.value = res.code === 200 ? (res.data || []) : []
+  } catch {
+    issueStatus.value = []
+  }
+}
+
+async function loadWeeklyReports () {
+  try {
+    const res = await reportWeeklyReportsApi()
+    weeklyReportList.value = res.code === 200 ? (res.data || []) : []
+    if (!weeklyData.value && weeklyReportList.value.length) {
+      selectedWeek.value = weeklyReportList.value[0].week
+      await loadWeeklyReport(selectedWeek.value)
+    }
+  } catch {
+    weeklyReportList.value = []
+  }
+}
+
+async function loadWeeklyReport (week) {
+  if (!week) {
+    weeklyData.value = null
+    return
+  }
+  try {
+    const res = await reportWeeklyReportApi(week)
+    weeklyData.value = res.code === 200 ? (res.data || null) : null
+  } catch {
+    weeklyData.value = null
+  }
+}
+
+async function generateWeekly () {
+  weeklyGenerating.value = true
+  try {
+    const res = await reportGenerateWeeklyApi({
+      date_from: dateFrom.value,
+      date_to: dateTo.value,
+      region: region.value
+    })
+    if (res.code !== 200) throw new Error(res.msg || 'generate weekly')
+    weeklyData.value = res.data || null
+    selectedWeek.value = weeklyData.value?.week || selectedWeek.value
+    await loadWeeklyReports()
+    ElMessage.success(res.msg || '周报已生成')
+  } catch (e) {
+    console.error(e)
+    ElMessage.warning(e.message || '周报生成失败')
+  } finally {
+    weeklyGenerating.value = false
   }
 }
 
@@ -680,6 +814,8 @@ watch([dateFrom, dateTo], () => scheduleLoad())
 onMounted(() => {
   window.addEventListener('resize', onResize)
   nextTick(() => loadAll(true))
+  loadWeeklyReports()
+  loadIssueStatus()
 })
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
@@ -872,6 +1008,33 @@ onUnmounted(() => {
 .summary-trends li {
   margin-bottom: 4px;
 }
+.weekly-card {
+  border-color: rgba(59, 130, 246, 0.38);
+}
+.weekly-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.weekly-body {
+  margin-top: 8px;
+}
+.weekly-section {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.42);
+  color: #cbd5e1;
+  font-size: 13px;
+}
+.weekly-section ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.weekly-section li {
+  margin-bottom: 4px;
+}
 .summary-quotes {
   margin-top: 12px;
   color: #cbd5e1;
@@ -924,9 +1087,19 @@ onUnmounted(() => {
   color: #dbeafe;
   line-height: 1.65;
 }
+.issue-status-table {
+  margin-top: 8px;
+}
+.issue-status-table :deep(.el-table__body),
+.issue-status-table :deep(.el-table__header) {
+  font-size: 13px;
+}
 @media (max-width: 768px) {
   .summary-grid {
     grid-template-columns: 1fr;
+  }
+  .weekly-actions {
+    justify-content: flex-start;
   }
 }
 </style>

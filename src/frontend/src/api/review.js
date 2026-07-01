@@ -183,3 +183,23 @@ export const getL2ByL1Api = (params) =>
 /** 导出复核数据 CSV */
 export const exportReviewsCsvApi = (params) =>
   `${API_BASE_URL}/export_reviews_csv?` + new URLSearchParams(params || {}).toString()
+
+/** 综合平台：实时看板与报表扩展 */
+export const dashboardKpiApi = () => request.get('/api/dashboard/kpi', { timeout: 15000 });
+
+export const dashboardAnomaliesApi = (days = 7) =>
+  request.get('/api/dashboard/anomalies', { params: { days }, timeout: 15000 });
+
+export const dashboardTrendApi = (days = 7) =>
+  request.get('/api/dashboard/trend', { params: { days }, timeout: 15000 });
+
+export const reportIssueStatusApi = (uploadBatch = '') =>
+  request.get('/api/report/issue_status', { params: { upload_batch: uploadBatch }, timeout: 15000 });
+
+export const reportWeeklyReportsApi = () => request.get('/api/report/weekly_reports', { timeout: 15000 });
+
+export const reportWeeklyReportApi = (week) =>
+  request.get('/api/report/weekly_report', { params: { week }, timeout: 15000 });
+
+export const reportGenerateWeeklyApi = (data) =>
+  request.post('/api/report/generate_weekly', data, { timeout: 300000 });

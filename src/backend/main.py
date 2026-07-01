@@ -65,6 +65,15 @@ from report_aggregator import (  # noqa: E402
     get_single_issue_trend_data,
     get_top_subtag_monthly_data,
 )
+from analytics_engine import (  # noqa: E402
+    compute_kpi_snapshot,
+    compute_weekly_trend,
+    detect_anomalies,
+    get_issue_status_by_l2,
+    list_weekly_reports,
+    load_weekly_report,
+    save_weekly_report,
+)
 
 ROOT_DIR = PROJECT_ROOT  # 兼容旧称：项目根目录
 # 自动化测试可通过 VOC_DB_PATH / VOC_KEYWORD_FILE 指向独立文件，避免污染开发数据
@@ -3753,6 +3762,110 @@ async def api_get_opinion_summary(
         return {"code": 200, "msg": "ok", "data": summary}
     except Exception as e:
         logger.exception("get_opinion_summary: %s", e)
+        return {"code": 500, "msg": str(e), "data": {}}
+
+
+@app.get("/api/dashboard/kpi")
+async def dashboard_kpi_api():
+    try:
+        data = await asyncio.to_thread(compute_kpi_snapshot, DB_PATH)
+        return {"code": 200, "msg": "ok", "data": data}
+    except Exception as e:
+        logger.exception("dashboard_kpi: %s", e)
+        return {"code": 500, "msg": str(e), "data": {}}
+
+
+@app.get("/api/dashboard/anomalies")
+async def dashboard_anomalies_api(days: int = 7):
+    try:
+        data = await asyncio.to_thread(detect_anomalies, DB_PATH, days)
+        return {"code": 200, "msg": "ok", "data": data}
+    except Exception as e:
+        logger.exception("dashboard_anomalies: %s", e)
+        return {"code": 500, "msg": str(e), "data": []}
+
+
+@app.get("/api/dashboard/trend")
+async def dashboard_trend_api(days: int = 7):
+    try:
+        data = await asyncio.to_thread(compute_weekly_trend, DB_PATH, days)
+        return {"code": 200, "msg": "ok", "data": data}
+    except Exception as e:
+        logger.exception("dashboard_trend: %s", e)
+        return {"code": 500, "msg": str(e), "data": []}
+
+
+@app.get("/api/report/issue_status")
+async def report_issue_status_api(upload_batch: str = ""):
+    try:
+        ub = upload_batch.strip() if upload_batch else None
+        data = await asyncio.to_thread(get_issue_status_by_l2, DB_PATH, ub)
+        return {"code": 200, "msg": "ok", "data": data}
+    except Exception as e:
+        logger.exception("report_issue_status: %s", e)
+        return {"code": 500, "msg": str(e), "data": []}
+
+
+@app.get("/api/report/weekly_reports")
+async def report_weekly_reports_api():
+    try:
+        data = await asyncio.to_thread(list_weekly_reports)
+        return {"code": 200, "msg": "ok", "data": data}
+    except Exception as e:
+        logger.exception("report_weekly_reports: %s", e)
+        return {"code": 500, "msg": str(e), "data": []}
+
+
+@app.get("/api/report/weekly_report")
+async def report_weekly_report_api(week: str = ""):
+    try:
+        if not week:
+            return {"code": 400, "msg": "需要 week", "data": {}}
+        data = await asyncio.to_thread(load_weekly_report, week)
+        return {"code": 200, "msg": "ok", "data": data}
+    except FileNotFoundError:
+        return {"code": 404, "msg": "周报不存在", "data": {}}
+    except Exception as e:
+        logger.exception("report_weekly_report: %s", e)
+        return {"code": 500, "msg": str(e), "data": {}}
+
+
+@app.post("/api/report/generate_weekly")
+async def report_generate_weekly_api(request: Request):
+    data = await request.json()
+    today = datetime.now().date()
+    date_to = str(data.get("date_to") or today.isoformat())[:10]
+    date_from = str(data.get("date_from") or (today - timedelta(days=6)).isoformat())[:10]
+    region = str(data.get("region") or "all")
+    limit = max(50, min(int(data.get("limit") or 1500), 5000))
+    try:
+        rows = _fetch_opinion_summary_rows(date_from, date_to, region, limit)
+        prev_df, prev_dt = _calc_prev_period(date_from, date_to, "week")
+        prev_rows = _fetch_opinion_summary_rows(prev_df, prev_dt, region, limit)
+        prev_l1_counter: Counter = Counter()
+        for row in prev_rows:
+            l1 = str(row.get("review_l1") or row.get("model_class") or "").strip()
+            if l1:
+                prev_l1_counter[l1] += 1
+        from qwen_ollama import summarize_opinions
+
+        summary = await asyncio.to_thread(
+            summarize_opinions,
+            rows,
+            period=f"{date_from} 至 {date_to}",
+            region=region,
+            prev_period_stats={"total": len(prev_rows), "by_l1": dict(prev_l1_counter)},
+            prev_period_rows=prev_rows,
+        )
+        iso_year, iso_week, _ = today.isocalendar()
+        week_label = str(data.get("week") or f"{iso_year}-W{iso_week:02d}")
+        summary["week"] = week_label
+        summary["date_from"] = date_from
+        summary["date_to"] = date_to
+        path = await asyncio.to_thread(save_weekly_report, week_label, summary)
+        return {"code": 200, "msg": f"周报已生成: {week_label}", "data": summary, "path": path}
+    except Exception as e:
+        logger.exception("report_generate_weekly: %s", e)
         return {"code": 500, "msg": str(e), "data": {}}
 
 

@@ -2142,6 +2142,11 @@ def _post_process_classify_result(
         out["srv_quality_guard"] = True
         out["raw_model_l1"] = wl1[:120]
         out["raw_model_l2"] = wl2[:120]
+    if os.environ.get("VOC_USE_MLX") == "1":
+        try:
+            out["l3_phrases"] = _extract_l3_phrases(text)
+        except Exception:
+            out["l3_phrases"] = ""
     l1, l2 = strip_non_issue_l2(l1, l2)
     out["l1"] = l1
     out["l2"] = l2
@@ -2200,6 +2205,35 @@ def _mlx_generate(prompt: str, max_tokens: int = 128) -> str:
         temperature=float(os.environ.get("VOC_QWEN_TEMPERATURE", "0.1")),
         verbose=False,
     )
+
+
+def _extract_l3_phrases(text: str) -> str:
+    """用 MLX 从投诉原文中提取 2-4 个具体问题短语；不可用时返回空字符串。"""
+    text = (text or "").strip()
+    if len(text) < 10:
+        return ""
+    try:
+        if not _mlx_model_load():
+            return ""
+        prompt = (
+            "从以下用户投诉中提取 2-4 个具体的、可执行的问题短语。\n"
+            "每个短语不超过 12 个字。不要使用“故障”“差劲”等泛词。\n"
+            "用英文逗号分隔。只输出短语，不要解释。\n\n"
+            f"投诉原文：{text[:600]}"
+        )
+        raw = _mlx_generate(prompt, max_tokens=80)
+        parts = re.split(r"[,，\n、;；]+", str(raw or ""))
+        phrases: List[str] = []
+        for part in parts:
+            p = re.sub(r"^[\s\"'“”‘’\-•\d.、]+|[\s\"'“”‘’。；;，,]+$", "", part).strip()
+            if 2 <= len(p) <= 18 and p not in phrases:
+                phrases.append(p)
+            if len(phrases) >= 4:
+                break
+        return ",".join(phrases)
+    except Exception as e:
+        logger.debug("L3 phrase extraction skipped: %s", e)
+        return ""
 
 
 def classify_text(text: str, *, db_path: str, country: str = "", model: str = QWEN_MODEL, host: str = QWEN_HOST) -> Dict[str, Any]:
