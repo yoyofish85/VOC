@@ -2153,6 +2153,13 @@ def _post_process_classify_result(
     return out
 
 
+def _mlx_match_type() -> str:
+    """根据是否配置 adapter 返回 match_type（便于前端/日志区分基座与 LoRA）。"""
+    if os.environ.get("VOC_MLX_ADAPTER", "").strip():
+        return "mlx_14b_lora"
+    return "mlx_14b_base"
+
+
 def _mlx_model_load() -> bool:
     """懒加载 MLX 模型 + 可选 LoRA adapter。"""
     global _MLX_MODEL, _MLX_TOKENIZER, _MLX_LOADED, _MLX_MODEL_PATH
@@ -2268,7 +2275,7 @@ def classify_text(text: str, *, db_path: str, country: str = "", model: str = QW
                 text,
                 l2_map,
                 model=mlx_model_name,
-                match_type="mlx_14b_lora",
+                match_type=_mlx_match_type(),
             )
         except Exception as e:
             return {

@@ -3,8 +3,8 @@
 > 本文档记录 V1.5 迭代中的**问题背景、改动内容、涉及文件与验证要点**，便于每次发版前核对「这次到底修了什么、没动什么」。  
 > 架构级 V3 标签体系说明见 [`VOC_V1.5_优化记录_v3.0.md`](./VOC_V1.5_优化记录_v3.0.md)。
 
-**最后更新**：2026-06-18  
-**适用分支**：VOC_V1.5 当前主开发线（`main`，commit `c51009d` 及以前）
+**最后更新**：2026-07-03  
+**适用分支**：VOC_V1.5 当前主开发线（`main`，commit `7eebfa8` 及以后含 LoRA 工具链）
 
 ---
 
@@ -30,6 +30,10 @@
 | R16 | 14B 批量稳定性 | >150 条分类 database is locked、整批确认仅写 20 条 | ✅ 已落地 |
 | R17 | 汇报文案四维度 | 数据汇报「生成汇报文案」无反馈、summary 缺趋势/原文 | ✅ 已落地 |
 | R18 | 年度 CSV 归档修复 | 排序倒序、VIN/车型缺失、所选确认误写 CSV | ✅ 已落地 |
+| R19 | MLX 可选推理后端 | `VOC_USE_MLX=1` 时走 MLX，与 Ollama 共享后处理 | ✅ 已落地 |
+| R20 | 交互优化 + 确认归档拆分 | 按钮语义、match_type 展示、确认归档与批次状态分离 | ✅ 已落地 |
+| R21 | 综合平台扩展 | 实时看板 KPI/异常/趋势、周报、L3 短语、问题状态 | ✅ 已落地 |
+| R22 | LoRA 路径 A 重训工具链 | 数据均衡 → 14B 训练 → smoke + holdout A/B 验证 | ✅ 已落地 |
 
 ---
 
@@ -588,6 +592,116 @@ Commit：`c51009d`（含 `580c2ed` 中 `main.py` 年度相关改动）
 
 ---
 
+### R19 · MLX 可选推理后端（2026-06-24）
+
+#### 背景
+
+Apple Silicon 服务器上 Ollama 14B 推理慢；开发机已完成 7B LoRA 预实验，需在 `classify_text` 增加 MLX 路径且与 Ollama 共享后处理。
+
+#### 改动
+
+| 项 | 内容 |
+|----|------|
+| 环境变量 | `VOC_USE_MLX=1` 启用；`VOC_MLX_MODEL` 基座；`VOC_MLX_ADAPTER` LoRA 权重目录 |
+| 懒加载 | `_mlx_model_load()` / `_mlx_generate()`；加载失败返回 `mlx_load_failed` |
+| 后处理 | `_post_process_classify_result()` 与 Ollama 共用；MLX 模式下附加 `l3_phrases` |
+| 长文本 | `_compact_classify_text()` 截断，避免 14B 批量超时 |
+
+#### 主要文件
+
+- `src/backend/qwen_ollama.py`
+- `tests/unit/test_mlx_backend.py`
+
+Commit：`876c4c3`
+
+---
+
+### R20 · 交互优化 + 确认归档拆分（2026-06-29）
+
+#### 改动摘要
+
+| 项 | 内容 |
+|----|------|
+| 确认归档 | `POST /api/confirm_and_write_csv` 确认所选并刷新年度 CSV |
+| 批次状态 | `POST /api/batch_status` 返回完成度与 L1 准确率 |
+| 前端 | 「确认归档」「归档年度数据」分按钮；`match_type` 展示 MLX 标签 |
+| 数据汇报 | 挂载时 `nocache` 刷新；汇报文案布局优化 |
+
+Commit：`a7013c8`、`00c321b`
+
+---
+
+### R21 · 综合平台扩展（2026-07-01）
+
+#### 后端
+
+- 新增 `analytics_engine.py`：KPI、异常检测（L2 突增 + L3）、7 日趋势、问题处理状态、周报存取
+- 7 个 API：`/api/dashboard/kpi|anomalies|trend`、`/api/report/issue_status|weekly_*|generate_weekly`
+- `scripts/backfill_l3_phrases.py` 回填历史 L3 短语
+
+#### 前端
+
+- 新建 `Overview.vue`（异常横幅、7 日 L1 趋势、钻取工作台）
+- `DataReport.vue` 增加周报与问题处理状态表
+
+Commit：`7eebfa8`；Deploy tag：`deploy_20260701_0927`
+
+---
+
+### R22 · LoRA 路径 A 重训工具链（2026-07-03）
+
+#### 背景
+
+服务器训练集约 2993 条，「非问题」占 ~62%，模型严重偏向非问题。路径 A：L1 均衡后重训 14B LoRA，holdout A/B 验证通过再部署。
+
+#### 新增脚本（服务器顺序执行）
+
+| 脚本 | 作用 |
+|------|------|
+| `scripts/balance_finetune_data.py` | 非问题 ≤ 原始 30%；业务三类全保留；体验需求升采样；输出 `mlx_finetune_balanced/{train,valid,test}.jsonl` |
+| `scripts/train_lora_14b.sh` | `python3 -m mlx_lm lora`，默认 1000 iters，adapter → `~/lora_adapter_14b_v2` |
+| `scripts/verify_lora.sh` | 5 条 smoke + holdout baseline/candidate/compare；Δ≥2pp 为 PASS |
+
+#### 代码优化
+
+| 项 | 内容 |
+|----|------|
+| `match_type` | 有 `VOC_MLX_ADAPTER` → `mlx_14b_lora`；无 adapter → `mlx_14b_base`（避免误标「微调」） |
+| 前端 | `OpinionReview.vue` 区分「MLX·14B微调 / MLX·14B基座」 |
+
+#### 前置与部署
+
+```bash
+# 1. 导出（服务器有复核数据后）
+python3 performance_evaluation/export_finetune_from_db.py
+
+# 2. 均衡 → 训练 → 验证
+python3 scripts/balance_finetune_data.py
+bash scripts/train_lora_14b.sh
+bash scripts/verify_lora.sh
+
+# 3. 启用 LoRA 推理
+export VOC_USE_MLX=1
+export VOC_MLX_MODEL=mlx-community/Qwen2.5-14B-Instruct-4bit
+export VOC_MLX_ADAPTER=~/lora_adapter_14b_v2
+```
+
+#### 测试
+
+- `tests/unit/test_balance_finetune_data.py` → 5 passed
+- `tests/unit/test_mlx_backend.py` → 8 passed（含 `_mlx_match_type`）
+
+#### LoRA 生效状态（2026-07-03）
+
+| 项 | 状态 |
+|----|------|
+| 7B 预实验 adapter（开发机 Desktop） | ✅ 训练完成，可手动加载验证 |
+| 14B v2 adapter（服务器） | ⏳ 待 `train_lora_14b.sh` 执行 |
+| 生产运行时默认 | ❌ 未设 `VOC_USE_MLX`，仍走 Ollama |
+| 库内 `mlx_*` match_type 记录 | 0 条（尚未切换 MLX 路径） |
+
+---
+
 ## 四、新增 / 关键 API 一览
 
 | 方法 | 路径 | 用途 |
@@ -605,6 +719,15 @@ Commit：`c51009d`（含 `580c2ed` 中 `main.py` 年度相关改动）
 | POST | `/api/confirm_review_batch` | 整批确认 + 即时写年度 CSV |
 | GET | `/api/confirm_review_batch/preview` | 整批确认前预览（未就绪行 409） |
 | GET | `/api/get_opinion_summary` | AI 汇报文案（四维度：volume/trends/quotes/ppt） |
+| POST | `/api/confirm_and_write_csv` | 确认所选并刷新年度 CSV |
+| POST | `/api/batch_status` | 批次完成度与 L1 准确率 |
+| GET | `/api/dashboard/kpi` | 看板 KPI 快照 |
+| GET | `/api/dashboard/anomalies` | L2 异常检测 |
+| GET | `/api/dashboard/trend` | 近 N 日 L1 趋势 |
+| GET | `/api/report/issue_status` | 按 L2 问题处理状态 |
+| GET | `/api/report/weekly_reports` | 周报列表 |
+| GET | `/api/report/weekly_report` | 指定周周报 |
+| POST | `/api/report/generate_weekly` | 生成本周周报 |
 
 ---
 
@@ -641,6 +764,11 @@ code_deploy/update.zip + update.zip.md5
 performance_evaluation/check_reflow_health.py
 performance_evaluation/export_finetune_from_db.py
 performance_evaluation/ab_compare_models.py
+scripts/balance_finetune_data.py
+scripts/train_lora_14b.sh
+scripts/verify_lora.sh
+src/backend/analytics_engine.py
+src/frontend/src/views/Overview.vue
 ```
 
 **服务器手动排查：**
@@ -678,7 +806,17 @@ python3 main.py
 
 微调触发条件（尚未满足）：新增复核 ≥ 3000 条 **且** L1 不一致 ≥ 800 条 **且** 连续 2 周 fixable < 5。
 
-### 6.2 历史优化对比（词库/规则迭代，2026-02）
+### 6.2 LoRA 与 MLX 推理（2026-07-03）
+
+| 项 | 说明 |
+|----|------|
+| 默认推理 | Ollama `qwen2.5:14b-instruct-q4_K_M`（`VOC_USE_MLX` 未设置） |
+| MLX 启用 | `VOC_USE_MLX=1` + `VOC_MLX_MODEL` + 可选 `VOC_MLX_ADAPTER` |
+| 训练数据均衡 | `scripts/balance_finetune_data.py`（非问题 cap 30%） |
+| 部署 gate | `verify_lora.sh` holdout Δ ≥ 2pp 才建议上线 |
+| 开发机 7B POC | `/Users/yuchao/Desktop/lora_adapter_7b_mlx`（预实验，非生产 14B） |
+
+### 6.3 历史优化对比（词库/规则迭代，2026-02）
 
 来源：`Project Documentation/优化文档/大模型分类准确率对比数据表.md`
 
@@ -690,7 +828,7 @@ python3 main.py
 
 按 L1 类型（优化后）：质量问题 76.8%、营销服务 81.2%、体验需求 74.3%、咨询 84.6%、非问题 82.1%。
 
-### 6.3 三级标签映射验证（2026-03）
+### 6.4 三级标签映射验证（2026-03）
 
 来源：`label_project/validation_report.md`
 
@@ -700,7 +838,7 @@ python3 main.py
 | L3 映射匹配率 | **97.00%**（97/100） |
 | 不匹配原因 | 3 条「三级标签不在映射列表中」 |
 
-### 6.4 开发机当前库（2026-06-18 实测）
+### 6.5 开发机当前库（2026-06-18 实测）
 
 来源：`evaluate_accuracy.py` 对 `src/backend/opinion_review.db` 只读评估
 
@@ -712,7 +850,7 @@ python3 main.py
 
 > 识别率请以**服务器生产库**运行 `python3 performance_evaluation/evaluate_accuracy.py --db <生产库路径>` 为准。
 
-### 6.5 分类路由指标（classify_route_metrics.jsonl）
+### 6.6 分类路由指标（classify_route_metrics.jsonl）
 
 近期压测与生产路由摘要（2026-06-16 ~ 06-18）：
 

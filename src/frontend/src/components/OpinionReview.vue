@@ -1454,9 +1454,10 @@ const matchTypeLabel = (mt) => {
     generic_l3: '通用·三级',
     generic: '通用',
     gold_review: '金标',
-    mlx_14b_lora: 'MLX·14B微调'
+    mlx_14b_lora: 'MLX·14B微调',
+    mlx_14b_base: 'MLX·14B基座'
   }
-  if (!m[mt] && mt && mt.startsWith('mlx_')) return 'MLX·14B微调'
+  if (!m[mt] && mt && mt.startsWith('mlx_')) return mt.includes('lora') ? 'MLX·14B微调' : 'MLX·14B'
   return m[mt] || mt || '—'
 }
 

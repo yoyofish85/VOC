@@ -81,6 +81,7 @@ def test_classify_text_mlx_success(mock_gen, mock_load, mock_extract, monkeypatc
 
     monkeypatch.setenv("VOC_USE_MLX", "1")
     monkeypatch.setenv("VOC_MLX_MODEL", "mlx-test-model")
+    monkeypatch.setenv("VOC_MLX_ADAPTER", "/tmp/test-adapter")
     mock_load.return_value = True
     mock_gen.return_value = '{"l1": "产品质量类", "l2": "车机问题"}'
     mock_extract.return_value = "车机黑屏"
@@ -132,6 +133,15 @@ def test_classify_text_mlx_whitelist_reject(mock_gen, mock_load, monkeypatch):
         result = qo.classify_text("测试", db_path=":memory:")
     assert result.get("match_type") == "mlx_rejected"
     assert result.get("needs_review") is True
+
+
+def test_mlx_match_type_without_adapter(monkeypatch):
+    import qwen_ollama as qo
+
+    monkeypatch.delenv("VOC_MLX_ADAPTER", raising=False)
+    assert qo._mlx_match_type() == "mlx_14b_base"
+    monkeypatch.setenv("VOC_MLX_ADAPTER", "/path/to/adapter")
+    assert qo._mlx_match_type() == "mlx_14b_lora"
 
 
 @patch("qwen_ollama.ollama_generate")
