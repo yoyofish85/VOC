@@ -2209,7 +2209,6 @@ def _mlx_generate(prompt: str, max_tokens: int = 128) -> str:
         _MLX_TOKENIZER,
         prompt=formatted,
         max_tokens=max_tokens,
-        temperature=float(os.environ.get("VOC_QWEN_TEMPERATURE", "0.1")),
         verbose=False,
     )
 
