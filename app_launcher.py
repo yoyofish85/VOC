@@ -96,6 +96,23 @@ def _drain_process_output(proc, lines: list, max_lines: int = 200):
         pass
 
 
+def _pause_or_exit(failed: bool = True) -> None:
+    """交互终端暂停；非 TTY（如 start_*.sh 后台）直接退出，避免 EOFError。"""
+    if failed:
+        if sys.stdin.isatty():
+            input("\n按 Enter 键退出...")
+        else:
+            sys.exit(1)
+
+
+def _launch_mode_label() -> str:
+    if os.environ.get("VOC_USE_MLX") == "1":
+        adapter = os.environ.get("VOC_MLX_ADAPTER", "").strip() or "无"
+        return f"MLX ({os.environ.get('VOC_MLX_MODEL', '14B')}, adapter={adapter})"
+    model = os.environ.get("VOC_QWEN_MODEL", "qwen2.5:14b-instruct-q4_K_M")
+    return f"Ollama ({model})"
+
+
 def start_backend():
     """启动后端服务"""
     global backend_process
@@ -105,17 +122,19 @@ def start_backend():
         kill_port(BACKEND_PORT)
         time.sleep(1)
 
-    print(f"[1/2] 启动后端服务 (端口 {BACKEND_PORT})...")
+    print(f"[1/2] 启动后端服务 (端口 {BACKEND_PORT})，分类模式: {_launch_mode_label()}...")
 
     os.chdir(BACKEND_DIR)
 
     backend_lines: list = []
+    child_env = os.environ.copy()
     backend_process = subprocess.Popen(
         [sys.executable, "main.py"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=child_env,
     )
     threading.Thread(
         target=_drain_process_output,
@@ -124,7 +143,7 @@ def start_backend():
         name="backend-log-drain",
     ).start()
 
-    max_wait = int(os.environ.get("VOC_BACKEND_START_WAIT", "120"))
+    max_wait = int(os.environ.get("VOC_BACKEND_START_WAIT", "180"))
     for i in range(max_wait):
         time.sleep(0.5)
         if backend_process.poll() is not None:
@@ -174,6 +193,7 @@ def start_frontend():
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=os.environ.copy(),
     )
 
     for i in range(30):
@@ -420,11 +440,11 @@ def main():
     print_banner()
 
     if not start_backend():
-        input("\n按 Enter 键退出...")
+        _pause_or_exit()
         return
 
     if not start_frontend():
-        input("\n按 Enter 键退出...")
+        _pause_or_exit()
         return
 
     url = f"http://localhost:{FRONTEND_PORT}"
