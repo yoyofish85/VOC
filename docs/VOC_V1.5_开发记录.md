@@ -35,6 +35,7 @@
 | R21 | 综合平台扩展 | 实时看板 KPI/异常/趋势、周报、L3 短语、问题状态 | ✅ 已落地 |
 | R22 | LoRA 路径 A 重训工具链 | 数据均衡 → 14B 训练 → smoke + holdout A/B 验证 | ✅ 已落地 |
 | R23 | 双启动脚本 + 服务器环境修复 | Ollama/MLX 一键切换；Python 3.12 venv；依赖版本锁定 | ✅ 已落地 |
+| R24 | MLX 准确率评估计划 | Track B 生产批次 + Track A holdout 对照；进化路线 | 📋 计划中 |
 
 ---
 
@@ -757,6 +758,32 @@ bash scripts/setup_server_venv.sh
 | `mlx_lm` + `transformers 5.12.1` | ✅ import 正常 |
 | Ollama 切换（`./start_ollama.sh`） | ✅ 待按需切换验证 |
 | 首次 MLX 分类加载 | ⚠ 约 90s（仅首次推理，非启动阶段） |
+
+---
+
+### R24 · MLX 准确率评估计划（2026-07-08）
+
+#### 计划文档
+
+`docs/plans/mlx-accuracy-evolution-plan.md`
+
+#### 两条评估轨道
+
+| 轨道 | 内容 | 优先级 |
+|------|------|--------|
+| **Track B** | 今明两天投喂 **300–400 条**，全 MLX+LoRA 分类 → 人工复核 → 评 L1/L2 | **当前主任务** |
+| **Track A** | holdout 三方 A/B + 影子评估（需先 `export_finetune` 初始化 holdout） | 一周内补齐 |
+
+#### 结论（计划内）
+
+- 对「MLX+LoRA 能不能用」：**Track B 更合适**，走真实生产链路且自然覆盖 L2。
+- Track A 不可替代 B，但是科学对照；holdout 当前为空，A/B 暂不可直接跑。
+- 推荐串联：B 批次进行中 → 并行初始化 holdout → 复核后评批次 → 补跑 A/B。
+
+#### 待实现（评估工具）
+
+- `evaluate_accuracy.py --upload-batch`（批次 L1/L2 正式口径）
+- `evaluate_accuracy.py --mlx-shadow-limit`（Ollama vs MLX 影子对照）
 
 ---
 

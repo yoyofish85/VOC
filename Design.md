@@ -310,4 +310,5 @@ VOC_V1.5/
 
 - [Product.md](./Product.md) — KPI、路线图、运营 SOP  
 - [Agent.md](./Agent.md) — Agent 协作与命令  
-- [AI_CONTEXT.md](./AI_CONTEXT.md) — 精简交接
+- [AI_CONTEXT.md](./AI_CONTEXT.md) — 精简交接  
+- [docs/plans/mlx-accuracy-evolution-plan.md](./docs/plans/mlx-accuracy-evolution-plan.md) — MLX 准确率评估与进化路线
