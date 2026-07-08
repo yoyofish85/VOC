@@ -19,17 +19,36 @@
 | `VOC_DB_PATH` | SQLite 数据库文件路径 |
 | `VOC_KEYWORD_FILE` | 关键词 JSON |
 | `VOC_ANNUAL_DIR` | 年度归档目录（默认 `data/annual`） |
+| `VOC_USE_MLX` | `1` 启用 MLX 推理（见 `start_mlx.sh`） |
+| `VOC_MLX_ADAPTER` | LoRA adapter 目录（默认 `~/lora_adapter_14b_v2`） |
 
-## 启动（与迁移前一致）
+## 启动
+
+### 开发机（默认 Ollama）
 
 ```bash
-# 桌面模式：后端 + 前端
 python3 app_launcher.py
+```
 
-# 仅后端（在 src/backend 目录）
-python3 main.py
+### 服务器（推荐双启动脚本）
 
-# npm 安装在 src/frontend 后
+```bash
+bash scripts/setup_server_venv.sh   # 首次
+./start_mlx.sh                      # MLX + LoRA
+./start_ollama.sh                   # 切换回 Ollama 14B
+```
+
+同一时间只运行一个实例；切换前先 Ctrl+C。
+
+### 仅后端
+
+```bash
+cd src/backend && python3 main.py
+```
+
+### 仅前端
+
+```bash
 cd src/frontend && npm run dev -- --port 8080
 ```
 

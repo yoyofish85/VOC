@@ -70,10 +70,18 @@ ALLOW_DIRTY_PACK=1      # 允许脏工作区打包
 SKIP_GIT_TAG=1          # 跳过 git tag 创建
 ```
 
-### 不会打包的内容
+### 不会打包的内容（需另行同步）
 
-- 项目根 `data/`、`label_project/`、`app_launcher.py`、`requirements.txt`
-- 若上述文件有变更，请 **另行 rsync / U 盘同步**
+| 路径 | 说明 |
+|------|------|
+| `app_launcher.py` | 启动器（含 env 传递、非 TTY 修复） |
+| `start_ollama.sh` / `start_mlx.sh` | 双推理路径启动脚本 |
+| `scripts/setup_server_venv.sh` 等 | venv / MLX 依赖工具链 |
+| `requirements.txt` / `requirements-mlx.txt` | Python 依赖清单 |
+| `data/`、`label_project/` | 数据与白名单 |
+| `performance_evaluation/` | 评估与 LoRA 脚本（按需） |
+
+若上述文件有变更，请 **另行 rsync / U 盘同步** 到服务器项目根目录。
 
 ---
 

@@ -3,8 +3,8 @@
 > 本文档记录 V1.5 迭代中的**问题背景、改动内容、涉及文件与验证要点**，便于每次发版前核对「这次到底修了什么、没动什么」。  
 > 架构级 V3 标签体系说明见 [`VOC_V1.5_优化记录_v3.0.md`](./VOC_V1.5_优化记录_v3.0.md)。
 
-**最后更新**：2026-07-03  
-**适用分支**：VOC_V1.5 当前主开发线（`main`，commit `7eebfa8` 及以后含 LoRA 工具链）
+**最后更新**：2026-07-08  
+**适用分支**：VOC_V1.5 当前主开发线（`main`，含双启动脚本与服务器 MLX 验证）
 
 ---
 
@@ -34,6 +34,7 @@
 | R20 | 交互优化 + 确认归档拆分 | 按钮语义、match_type 展示、确认归档与批次状态分离 | ✅ 已落地 |
 | R21 | 综合平台扩展 | 实时看板 KPI/异常/趋势、周报、L3 短语、问题状态 | ✅ 已落地 |
 | R22 | LoRA 路径 A 重训工具链 | 数据均衡 → 14B 训练 → smoke + holdout A/B 验证 | ✅ 已落地 |
+| R23 | 双启动脚本 + 服务器环境修复 | Ollama/MLX 一键切换；Python 3.12 venv；依赖版本锁定 | ✅ 已落地 |
 
 ---
 
@@ -702,6 +703,63 @@ export VOC_MLX_ADAPTER=~/lora_adapter_14b_v2
 
 ---
 
+### R23 · 双启动脚本 + 服务器 MLX 环境修复（2026-07-08）
+
+#### 背景
+
+服务器首次部署 MLX+LoRA 时出现：后台启动超时、`ModuleNotFoundError: fastapi`、`import mlx_lm` 失败、`python-multipart` 缺失等问题。需固化「Ollama / MLX」切换方式与 venv 安装流程。
+
+#### 新增/更新文件
+
+| 文件 | 作用 |
+|------|------|
+| `start_ollama.sh` | 清除 MLX 变量，前台启动 Ollama 14B 分类路径 |
+| `start_mlx.sh` | 设置 `VOC_USE_MLX=1` + adapter，自动检查/安装 MLX 依赖 |
+| `scripts/setup_server_venv.sh` | 一键创建 Python 3.11–3.13 的 `.venv` 并安装全部依赖 |
+| `scripts/find_python_for_venv.sh` | 自动选择 `python3.12` 等（排除 3.14） |
+| `scripts/resolve_venv_python.sh` | 启动脚本解析 `.venv/bin/python` |
+| `scripts/ensure_mlx_deps.sh` | 修复 `mlx_lm` 导入；限制 `transformers<5.13` |
+| `requirements-mlx.txt` | MLX 依赖锁定（含 `transformers>=5.0.0,<5.13.0`） |
+| `app_launcher.py` | 显式传递 env 给子进程；非 TTY 跳过 `input()`；等待 180s |
+
+#### 关键修复
+
+| 问题 | 修复 |
+|------|------|
+| Python 3.14 venv | `pydantic` 无轮子；强制 3.11–3.13 |
+| `transformers 5.13` + `mlx-lm 0.31` | `import mlx_lm` 报错；锁定 `<5.13` |
+| `temperature` 传入 `mlx_lm.generate` | 启动即崩溃；已删除该参数 |
+| 系统 `python3` 与 venv 混用 | 启动脚本显式用 `.venv/bin/python` |
+| 缺 `python-multipart` | 写入 `requirements.txt`；启动前自动补装 |
+
+#### 服务器日常使用（已验证）
+
+```bash
+cd "/Users/chaoyu/Desktop/VOC_AI agent/VOC_V1.5"
+
+# 首次或重建环境
+bash scripts/setup_server_venv.sh
+
+# MLX + LoRA（默认 adapter: ~/lora_adapter_14b_v2，可用 VOC_MLX_ADAPTER 覆盖）
+./start_mlx.sh
+
+# 切换回 Ollama Qwen 14B（先 Ctrl+C 停掉 MLX 实例）
+./start_ollama.sh
+```
+
+`source .venv/bin/activate` **可选**；启动脚本会自动解析 venv Python。
+
+#### LoRA 生效状态（2026-07-08 服务器实测）
+
+| 项 | 状态 |
+|----|------|
+| MLX+LoRA 启动（`./start_mlx.sh`） | ✅ 后端/前端正常 |
+| `mlx_lm` + `transformers 5.12.1` | ✅ import 正常 |
+| Ollama 切换（`./start_ollama.sh`） | ✅ 待按需切换验证 |
+| 首次 MLX 分类加载 | ⚠ 约 90s（仅首次推理，非启动阶段） |
+
+---
+
 ## 四、新增 / 关键 API 一览
 
 | 方法 | 路径 | 用途 |
@@ -767,8 +825,15 @@ performance_evaluation/ab_compare_models.py
 scripts/balance_finetune_data.py
 scripts/train_lora_14b.sh
 scripts/verify_lora.sh
-src/backend/analytics_engine.py
-src/frontend/src/views/Overview.vue
+scripts/setup_server_venv.sh
+scripts/ensure_mlx_deps.sh
+scripts/find_python_for_venv.sh
+scripts/resolve_venv_python.sh
+requirements.txt
+requirements-mlx.txt
+app_launcher.py
+start_ollama.sh
+start_mlx.sh
 ```
 
 **服务器手动排查：**
@@ -806,15 +871,17 @@ python3 main.py
 
 微调触发条件（尚未满足）：新增复核 ≥ 3000 条 **且** L1 不一致 ≥ 800 条 **且** 连续 2 周 fixable < 5。
 
-### 6.2 LoRA 与 MLX 推理（2026-07-03）
+### 6.2 LoRA 与 MLX 推理（2026-07-08）
 
 | 项 | 说明 |
 |----|------|
-| 默认推理 | Ollama `qwen2.5:14b-instruct-q4_K_M`（`VOC_USE_MLX` 未设置） |
-| MLX 启用 | `VOC_USE_MLX=1` + `VOC_MLX_MODEL` + 可选 `VOC_MLX_ADAPTER` |
-| 训练数据均衡 | `scripts/balance_finetune_data.py`（非问题 cap 30%） |
-| 部署 gate | `verify_lora.sh` holdout Δ ≥ 2pp 才建议上线 |
-| 开发机 7B POC | `/Users/yuchao/Desktop/lora_adapter_7b_mlx`（预实验，非生产 14B） |
+| 默认推理（Ollama） | `./start_ollama.sh` → `qwen2.5:14b-instruct-q4_K_M` |
+| MLX+LoRA 推理 | `./start_mlx.sh` → `VOC_USE_MLX=1` + `~/lora_adapter_14b_v2` |
+| Python 版本 | **3.11–3.13**（勿用 3.14 建 venv） |
+| MLX 依赖 | `requirements-mlx.txt`；`transformers<5.13` |
+| 环境初始化 | `bash scripts/setup_server_venv.sh` |
+| 训练数据均衡 | `scripts/balance_finetune_data.py` |
+| 部署 gate | `verify_lora.sh` holdout Δ ≥ 2pp |
 
 ### 6.3 历史优化对比（词库/规则迭代，2026-02）
 

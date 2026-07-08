@@ -253,13 +253,26 @@ VOC_V1.5/
 
 > 只部署新规则、不重写 v3 → 跑 `evaluate_accuracy.py` **数字不变**是预期行为。
 
-### 7.3 Ollama 环境（服务器）
+### 7.3 推理环境（服务器）
+
+**Ollama（`./start_ollama.sh`）：**
 
 ```bash
 ollama pull qwen2.5:14b-instruct-q4_K_M
 export VOC_QWEN_MODEL=qwen2.5:14b-instruct-q4_K_M
 export OLLAMA_HOST=http://127.0.0.1:11434
 ```
+
+**MLX + LoRA（`./start_mlx.sh`）：**
+
+```bash
+bash scripts/setup_server_venv.sh          # 首次：Python 3.11–3.13 venv
+export VOC_USE_MLX=1
+export VOC_MLX_MODEL=mlx-community/Qwen2.5-14B-Instruct-4bit
+export VOC_MLX_ADAPTER=~/lora_adapter_14b_v2   # 或实际 adapter 路径
+```
+
+约束：`transformers<5.13`；须 `python-multipart`；勿用 Python 3.14 建 venv。
 
 ---
 

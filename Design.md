@@ -1,6 +1,6 @@
 # VOC_V1.5 · Design
 
-> **最后更新**：2026-06-04  
+> **最后更新**：2026-07-08  
 > **规则版本**：`v12_m4b_r4`（缓存键 `classify_v12_m4b_r4`）  
 > **设计原则**：14B 出标 + 可离线重放的确定性规则链；评估与写库分离；patch 幂等
 
@@ -202,7 +202,7 @@ Holdout L1 不回退（微调路径）
 | `historical_examples` | 弱 few-shot | prompt 注入最多 4 条相似已复核样例 |
 | `refresh_matcher_gold_cache` | 运行时刷新 | 复核后刷新内存金标 |
 | 规则 patch | 人工驱动 | eval → 改 regex → CSV patch |
-| 14B 微调 | **未接入生产** | 脚本在 `scripts/`，MVP M2 建池 |
+| 14B 微调 | **可选 MLX 路径** | `./start_mlx.sh` + LoRA adapter；默认仍 Ollama |
 
 **不是**：自动规则生成、自动 fine-tune、自动全库 rewrite。
 
@@ -219,20 +219,42 @@ Holdout L1 不回退（微调路径）
 
 **不包含**：`label_project/`、`performance_evaluation/`、`*.db`、`data/`
 
-### 7.2 需单独 rsync 的目录
+### 7.2 需单独 rsync 的目录/文件
 
 - `performance_evaluation/` — 评估、patch、周报告
 - `label_project/` — 白名单 JSON、taxonomy
+- `scripts/` — venv/MLX/LoRA 工具链
+- `app_launcher.py`、`start_ollama.sh`、`start_mlx.sh`
+- `requirements.txt`、`requirements-mlx.txt`
 - `AI_CONTEXT.md`、`Product.md`、`Design.md`、`Agent.md`
 
-### 7.3 Ollama
+### 7.3 双推理路径（Ollama / MLX）
+
+| 模式 | 启动 | 环境变量 |
+|------|------|----------|
+| Ollama 14B（默认） | `./start_ollama.sh` | `VOC_QWEN_MODEL=qwen2.5:14b-instruct-q4_K_M` |
+| MLX + LoRA | `./start_mlx.sh` | `VOC_USE_MLX=1`、`VOC_MLX_MODEL`、`VOC_MLX_ADAPTER` |
+
+Ollama 额外要求：
 
 ```bash
-export VOC_QWEN_MODEL=qwen2.5:14b-instruct-q4_K_M
+ollama pull qwen2.5:14b-instruct-q4_K_M
 export OLLAMA_HOST=http://127.0.0.1:11434
 ```
 
 全量 reclassify ~2362 条 ≈ **155 分钟**。
+
+### 7.4 服务器 Python 环境（MLX）
+
+```bash
+bash scripts/setup_server_venv.sh   # Python 3.11–3.13，排除 3.14
+```
+
+| 约束 | 原因 |
+|------|------|
+| `transformers<5.13` | `mlx-lm 0.31.x` 与 5.13+ 不兼容 |
+| `python-multipart` | FastAPI 表单上传依赖 |
+| `.venv/bin/python` | 避免系统 Python 缺 fastapi |
 
 ---
 
