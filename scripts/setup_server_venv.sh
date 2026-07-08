@@ -27,8 +27,11 @@ echo "升级 pip ..."
 echo "安装 requirements.txt ..."
 .venv/bin/pip install -r requirements.txt
 
-echo "安装 mlx-lm（MLX+LoRA 推理）..."
-.venv/bin/pip install mlx-lm
+echo "安装 requirements-mlx.txt（MLX+LoRA 推理）..."
+.venv/bin/pip install -r requirements-mlx.txt
+
+echo "验证 mlx_lm 导入 ..."
+.venv/bin/python -c "import mlx_lm; print('mlx_lm:', getattr(mlx_lm, '__version__', 'ok'))"
 
 echo ""
 echo "✅ 完成: .venv/bin/python ($(.venv/bin/python --version))"

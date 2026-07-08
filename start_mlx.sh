@@ -20,9 +20,7 @@ if ! "$PYTHON" -c "import fastapi, uvicorn" 2>/dev/null; then
   echo "   请执行: $PYTHON -m pip install -r requirements.txt"
   exit 1
 fi
-if ! "$PYTHON" -c "import mlx_lm" 2>/dev/null; then
-  echo "❌ MLX 模式需要 mlx-lm，当前环境未安装: $PYTHON"
-  echo "   请执行: $PYTHON -m pip install mlx-lm"
+if ! bash scripts/ensure_mlx_deps.sh "$PYTHON"; then
   exit 1
 fi
 
