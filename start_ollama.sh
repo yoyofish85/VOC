@@ -8,10 +8,10 @@ echo '║   分类模型：Ollama 14B（原始）            ║'
 echo '║   未加载 LoRA adapter                    ║'
 echo '╚══════════════════════════════════════════╝'
 
-PYTHON="$(bash scripts/resolve_venv_python.sh)"
+PYTHON="$(bash scripts/resolve_venv_python.sh || true)"
 if [[ -z "$PYTHON" ]]; then
-  echo "❌ 未找到 .venv 或 venv，请先创建虚拟环境并安装依赖："
-  echo "   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  echo "❌ 未找到兼容的 .venv（需要 Python 3.11–3.13，不能用 3.14）"
+  echo "   请执行: bash scripts/setup_server_venv.sh"
   exit 1
 fi
 
