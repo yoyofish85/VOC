@@ -20,6 +20,10 @@ if ! "$PYTHON" -c "import fastapi, uvicorn" 2>/dev/null; then
   echo "   请执行: $PYTHON -m pip install -r requirements.txt"
   exit 1
 fi
+if ! "$PYTHON" -c "import multipart" 2>/dev/null; then
+  echo "⚠ 缺少 python-multipart（CSV 上传需要），正在安装..."
+  "$PYTHON" -m pip install python-multipart
+fi
 
 unset VOC_USE_MLX VOC_MLX_ADAPTER VOC_MLX_MODEL
 export VOC_BACKEND_START_WAIT="${VOC_BACKEND_START_WAIT:-180}"

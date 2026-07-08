@@ -20,6 +20,10 @@ if ! "$PYTHON" -c "import fastapi, uvicorn" 2>/dev/null; then
   echo "   请执行: $PYTHON -m pip install -r requirements.txt"
   exit 1
 fi
+if ! "$PYTHON" -c "import multipart" 2>/dev/null; then
+  echo "⚠ 缺少 python-multipart（CSV 上传需要），正在安装..."
+  "$PYTHON" -m pip install python-multipart
+fi
 if ! bash scripts/ensure_mlx_deps.sh "$PYTHON"; then
   exit 1
 fi
