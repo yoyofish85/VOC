@@ -36,6 +36,7 @@
 | R22 | LoRA 路径 A 重训工具链 | 数据均衡 → 14B 训练 → smoke + holdout A/B 验证 | ✅ 已落地 |
 | R23 | 双启动脚本 + 服务器环境修复 | Ollama/MLX 一键切换；Python 3.12 venv；依赖版本锁定 | ✅ 已落地 |
 | R24 | MLX 准确率评估计划 | Track B 生产批次 + Track A holdout 对照；进化路线 | 📋 计划中 |
+| R25 | MVP 90–93% + 分步门禁 | 目标锁定；E0–E7 门禁；Track B 82.64% 已归档 | ⏳ 执行中 |
 
 ---
 
