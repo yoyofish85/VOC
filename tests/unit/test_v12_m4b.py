@@ -237,6 +237,22 @@ def test_o1_does_not_hide_service_complaint():
     assert not flags.get("context_non_issue")
 
 
+def test_o1_appointment_inquiry_overrides_service_to_non_issue():
+    l2_map = load_l2_whitelist()
+    for text in (
+        "用户反馈需要预约保养",
+        "车辆有什么问题，需要到店检测",
+    ):
+        l1, l2, flags = apply_classification_post_rules(
+            text,
+            "服务类",
+            "售后服务问题",
+            l2_map,
+        )
+        assert (l1, l2) == ("非问题", ""), text
+        assert flags.get("context_non_issue"), text
+
+
 def test_o3_app_narrative_overrides_experience_to_non_issue():
     l2_map = load_l2_whitelist()
     l1, l2, flags = apply_classification_post_rules(

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 
-_ASSIST_DOMAIN = re.compile(r"爆胎|扎钉|轮胎没气|交通事故|发生事故|道路救援|拖车|保养")
+_ASSIST_DOMAIN = re.compile(
+    r"爆胎|扎钉|轮胎没气|交通事故|发生事故|道路救援|拖车|保养|"
+    r"到店检测|到店检查|预约检测|预约检查|有什么问题|怎么回事"
+)
 _ASSIST_INTENT = re.compile(r"咨询|询问|需要|协助|安排|预约|上门|如何处理|怎么办|求助")
 _EXPLICIT_ISSUE = re.compile(
     r"投诉|不满|态度差|无人响应|无法联系|未处理|乱收费|收费不合理|"
@@ -27,7 +30,7 @@ _CAR_CHARGING = re.compile(
 
 
 def assistance_should_be_non_issue(text: str) -> bool:
-    """O1：爆胎/事故/保养协助等咨询请求 → 非问题（非投诉/故障）。"""
+    """O1：道路协助/保养预约/到店检测等咨询请求 → 非问题（非投诉/故障）。"""
     t = (text or "").strip()
     return bool(
         _ASSIST_DOMAIN.search(t)

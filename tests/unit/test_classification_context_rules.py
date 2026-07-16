@@ -19,6 +19,8 @@ from classification_context_rules import (  # noqa: E402
 def test_assistance_request_is_non_issue():
     assert assistance_should_be_non_issue("车辆扎钉爆胎，需要安排道路救援拖车")
     assert assistance_should_be_non_issue("咨询保养预约，需要协助安排时间")
+    assert assistance_should_be_non_issue("用户反馈需要预约保养")
+    assert assistance_should_be_non_issue("车辆有什么问题，需要到店检测")
 
 
 def test_assistance_with_service_complaint_is_not_captured():
@@ -26,6 +28,12 @@ def test_assistance_with_service_complaint_is_not_captured():
     assert not assistance_should_be_non_issue("保养后车辆故障无法启动，要求维修")
     assert not assistance_should_be_non_issue(
         "车辆发生单方事故，想协调拖车拖至门店维修，需要报价"
+    )
+    assert not assistance_should_be_non_issue(
+        "用户反馈：车辆黑屏无法启动，需要到店检测维修"
+    )
+    assert not assistance_should_be_non_issue(
+        "保养后车辆故障无法启动，要求到店检测"
     )
 
 
