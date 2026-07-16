@@ -264,3 +264,31 @@ def test_o3_app_narrative_overrides_experience_to_non_issue():
     )
     assert (l1, l2) == ("非问题", "")
     assert flags.get("context_non_issue")
+
+
+def test_supplier_station_issue_maps_to_lfc():
+    l2_map = load_l2_whitelist()
+    l1, l2, flags = apply_classification_post_rules(
+        "国内蔚来充电桩下线，站点无法使用",
+        "产品质量类",
+        "车端充电问题",
+        l2_map,
+    )
+    assert l1 == "产品质量类"
+    assert l2 == "LFC问题"
+    assert flags.get("charging_l2_boundary")
+
+
+def test_vehicle_power_and_scheduled_charge_map_to_car_charging():
+    l2_map = load_l2_whitelist()
+    cases = (
+        ("车辆充电功率低，只有20kW", "LFC问题"),
+        ("车辆预约充电没有开始，充不进电", "LFC问题"),
+    )
+    for text, wrong_l2 in cases:
+        l1, l2, flags = apply_classification_post_rules(
+            text, "产品质量类", wrong_l2, l2_map
+        )
+        assert l1 == "产品质量类", text
+        assert l2 == "车端充电问题", text
+        assert flags.get("charging_l2_boundary"), text

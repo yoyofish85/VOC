@@ -41,6 +41,7 @@ from taxonomy_normalize import (  # noqa: E402
 from classification_context_rules import (  # noqa: E402
     app_narrative_should_be_non_issue,
     assistance_should_be_non_issue,
+    charging_l2_target,
 )
 
 logger = logging.getLogger("voc.qwen_ollama")
@@ -1517,6 +1518,9 @@ def _lfc_blocks_positive_capture(text: str) -> bool:
 def _pick_lfc_l2(text: str, l2_map: Dict[str, List[str]]) -> str:
     """LFC/充电域二级优先 LFC问题，其次车端充电问题。"""
     opts = l2_map.get("产品质量类") or []
+    target = charging_l2_target(text)
+    if target in opts:
+        return target
     t = text or ""
     if re.search(r"极充|超充|lfc|闪充|占位|充站|家充|充桩|地锁|功率", t, re.I):
         for k in ("LFC问题", "车端充电问题"):
@@ -1687,6 +1691,9 @@ def _pick_l2_after_remap(l1: str, text: str, l2_map: Dict[str, List[str]]) -> st
         return ""
     t = text or ""
     if l1 == "产品质量类":
+        target = charging_l2_target(t)
+        if target in opts:
+            return target
         if re.search(r"充电|[闪超]充|家充|桩|地锁|跳枪", t):
             for k in ("车端充电问题", "LFC问题"):
                 if k in opts:
@@ -2086,6 +2093,13 @@ def apply_classification_post_rules(
         flags.pop("charging_guard", None)
         flags.pop("srv_quality_guard", None)
         flags.pop("l1_category_rebalance", None)
+
+    if canonicalize_l1_label(l1) == "产品质量类":
+        product_opts = l2_map.get("产品质量类") or []
+        target_l2 = charging_l2_target(text)
+        if target_l2 and target_l2 in product_opts and target_l2 != l2:
+            l2 = target_l2
+            flags["charging_l2_boundary"] = True
 
     l1, l2 = strip_non_issue_l2(l1, l2)
     return l1, l2, flags
