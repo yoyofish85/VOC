@@ -23,6 +23,18 @@ def test_assistance_request_is_non_issue():
     assert assistance_should_be_non_issue("车辆有什么问题，需要到店检测")
 
 
+def test_assistance_blocks_service_delay_and_fault():
+    assert not assistance_should_be_non_issue(
+        "客户反馈预约了门店保养一直没人联系，拨打座机电话显示空号，需要门店主动联系对接"
+    )
+    assert not assistance_should_be_non_issue(
+        "用户反馈车辆在地库，轮胎被扎钉了，需要移动上门服务来处理，再次致电，表示已经过了这么久，为什么还没"
+    )
+    assert not assistance_should_be_non_issue(
+        "三角钥匙无法使用，要求安排上门处理"
+    )
+
+
 def test_assistance_with_service_complaint_is_not_captured():
     assert not assistance_should_be_non_issue("爆胎后联系售后两小时无人响应，投诉服务差")
     assert not assistance_should_be_non_issue("保养后车辆故障无法启动，要求维修")
@@ -61,6 +73,11 @@ def test_vehicle_family_from_vin():
 def test_charging_station_and_supplier_are_lfc():
     assert charging_l2_target("蔚来充电桩已下线，站点无法使用") == "LFC问题"
     assert charging_l2_target("浩瀚供应商的闪充站一直不可用") == "LFC问题"
+
+
+def test_station_status_inquiry_does_not_force_lfc():
+    assert charging_l2_target("西安金鹰国际购物中心闪充站不能使用，需要回复") == ""
+    assert charging_l2_target("闪充站修好了没，询问什么时候维修完成") == ""
 
 
 def test_vehicle_side_charging_is_car_charging():

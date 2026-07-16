@@ -294,18 +294,31 @@ def test_vehicle_power_and_scheduled_charge_map_to_car_charging():
         assert flags.get("charging_l2_boundary"), text
 
 
-def test_scc_vin_maps_generic_product_issue_to_emira():
+def test_scc_vin_maps_empty_l2_to_emira():
     l2_map = load_l2_whitelist()
     l1, l2, flags = apply_classification_post_rules(
         "用户反馈车辆故障灯亮",
         "产品质量类",
-        "故障-通用",
+        "",
         l2_map,
         vin="SCCLEKAX1RHA12345",
     )
     assert l1 == "产品质量类"
     assert l2 == "Emira问题"
     assert flags.get("vin_vehicle_hint")
+
+
+def test_scc_vin_does_not_override_generic_fault_l2():
+    l2_map = load_l2_whitelist()
+    _, l2, flags = apply_classification_post_rules(
+        "用户反馈车辆故障灯亮",
+        "产品质量类",
+        "故障-通用",
+        l2_map,
+        vin="SCCLEKAX1RHA12345",
+    )
+    assert l2 == "故障-通用"
+    assert not flags.get("vin_vehicle_hint")
 
 
 def test_lju_vin_prevents_emira_label():
@@ -331,3 +344,25 @@ def test_charging_consult_stays_non_issue_in_full_chain():
     )
     assert (l1, l2) == ("非问题", "")
     assert not flags.get("charging_guard")
+
+
+def test_station_inquiry_keeps_car_charging_l2():
+    l2_map = load_l2_whitelist()
+    text = "客户反馈西安金鹰国际购物中心闪充站不能使用，需要回复"
+    _, l2, flags = apply_classification_post_rules(
+        text, "产品质量类", "车端充电问题", l2_map
+    )
+    assert l2 == "车端充电问题"
+    assert not flags.get("charging_l2_boundary")
+
+
+def test_range_inquiry_stays_non_issue():
+    l2_map = load_l2_whitelist()
+    l1, l2, flags = apply_classification_post_rules(
+        "反馈自己车辆充满电之后，续航只有480左右，询问是否正常",
+        "非问题",
+        "",
+        l2_map,
+    )
+    assert (l1, l2) == ("非问题", "")
+    assert not flags.get("non_issue_guard")

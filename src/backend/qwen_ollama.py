@@ -1601,6 +1601,11 @@ _KZ_FOLLOWUP_SALES = re.compile(r"(销售回访|试驾回访)", re.I)
 _KZ_FOLLOWUP_DELIVERY = re.compile(r"交付回访", re.I)
 _KZ_FOLLOWUP_AFTERSALE = re.compile(r"售后回访", re.I)
 
+_NEUTRAL_RANGE_INQUIRY = re.compile(
+    r"(续航|电耗|里程).{0,24}(是否正常|正常吗|询问|咨询)|询问是否正常",
+    re.I,
+)
+
 
 def _pick_service_l2_from_text(text: str, l2_map: Dict[str, List[str]]) -> str:
     """服务类二级：回访类型优先于默认顺序（修复 售后服务→销售服务 误映射）。"""
@@ -1735,13 +1740,17 @@ def apply_non_issue_guardrail(
     l1c = canonicalize_l1_label(l1)
     opts = l2_map.get(l1c) or []
     l2s = (l2 or "").strip()
-    if opts and l2s not in opts:
+    if opts and l2s and l2s not in opts:
         l2s = _nearest(l2s, opts)
 
     if l1c != "非问题":
         return l1c, l2s, False
 
     t = text or ""
+    if _NEUTRAL_RANGE_INQUIRY.search(t) and not re.search(
+        r"投诉|不满|异常|故障|达不到|虚标|严重|明显偏低", t, re.I
+    ):
+        return l1c, "", False
     if not _FORBID_NON_ISSUE.search(t) and not _KZ_BUSINESS_ISSUE_GUARD.search(t) and not _phase2_pullback_needed(t):
         return l1c, "", False
 
@@ -2104,7 +2113,7 @@ def apply_classification_post_rules(
             flags["charging_l2_boundary"] = True
 
         family = vehicle_family(vin)
-        if family == "emira" and "Emira问题" in product_opts and l2 in ("", "故障-通用"):
+        if family == "emira" and "Emira问题" in product_opts and l2 in ("",):
             l2 = "Emira问题"
             flags["vin_vehicle_hint"] = True
         elif family == "electric" and l2 == "Emira问题":
