@@ -42,6 +42,7 @@ from classification_context_rules import (  # noqa: E402
     app_narrative_should_be_non_issue,
     assistance_should_be_non_issue,
     charging_l2_target,
+    vehicle_family,
 )
 
 logger = logging.getLogger("voc.qwen_ollama")
@@ -2100,6 +2101,15 @@ def apply_classification_post_rules(
         if target_l2 and target_l2 in product_opts and target_l2 != l2:
             l2 = target_l2
             flags["charging_l2_boundary"] = True
+
+        family = vehicle_family(vin)
+        if family == "emira" and "Emira问题" in product_opts and l2 in ("", "故障-通用"):
+            l2 = "Emira问题"
+            flags["vin_vehicle_hint"] = True
+        elif family == "electric" and l2 == "Emira问题":
+            candidates = [x for x in product_opts if x != "Emira问题"]
+            l2 = _nearest("故障-通用", candidates) if candidates else ""
+            flags["vin_vehicle_hint"] = True
 
     l1, l2 = strip_non_issue_l2(l1, l2)
     return l1, l2, flags

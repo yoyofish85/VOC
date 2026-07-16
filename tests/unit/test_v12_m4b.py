@@ -292,3 +292,30 @@ def test_vehicle_power_and_scheduled_charge_map_to_car_charging():
         assert l1 == "产品质量类", text
         assert l2 == "车端充电问题", text
         assert flags.get("charging_l2_boundary"), text
+
+
+def test_scc_vin_maps_generic_product_issue_to_emira():
+    l2_map = load_l2_whitelist()
+    l1, l2, flags = apply_classification_post_rules(
+        "用户反馈车辆故障灯亮",
+        "产品质量类",
+        "故障-通用",
+        l2_map,
+        vin="SCCLEKAX1RHA12345",
+    )
+    assert l1 == "产品质量类"
+    assert l2 == "Emira问题"
+    assert flags.get("vin_vehicle_hint")
+
+
+def test_lju_vin_prevents_emira_label():
+    l2_map = load_l2_whitelist()
+    _, l2, flags = apply_classification_post_rules(
+        "用户反馈车辆故障灯亮",
+        "产品质量类",
+        "Emira问题",
+        l2_map,
+        vin="LJUBMSA14RK008070",
+    )
+    assert l2 != "Emira问题"
+    assert flags.get("vin_vehicle_hint")
