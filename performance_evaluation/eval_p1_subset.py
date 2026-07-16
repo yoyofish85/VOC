@@ -49,6 +49,7 @@ sys.path.insert(0, str(PERF_DIR))
 
 from taxonomy_normalize import L2_EVAL_L1, NON_ISSUE_L1, canonicalize_l1_label  # noqa: E402
 from evaluate_accuracy import _connect_readonly, model_labels  # noqa: E402
+from post_rules_replay import apply_post_rules_with_context  # noqa: E402
 
 # P1 主靶：人工=非问题，模型=业务三类（正向捕获应修复）
 P1_PRIMARY_HUMAN = NON_ISSUE_L1
@@ -111,12 +112,12 @@ def classify_subset(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict],
 
 
 def replay_rules(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    from qwen_ollama import apply_classification_post_rules, load_l2_whitelist  # noqa: E402
+    from qwen_ollama import load_l2_whitelist  # noqa: E402
 
     l2_map = load_l2_whitelist()
     enriched: List[Dict[str, Any]] = []
     for d in rows:
-        nl1, nl2, flags = apply_classification_post_rules(
+        nl1, nl2, flags = apply_post_rules_with_context(
             d["text"],
             d["model_l1"],
             d["model_l2"],

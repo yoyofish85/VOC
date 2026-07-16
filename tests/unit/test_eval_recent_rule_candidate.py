@@ -63,3 +63,24 @@ def test_compare_rows_l2_fixed_broken():
     assert result["l2_fixed"] == 1
     assert result["l2_broken"] == 1
     assert result["l2_net"] == 0
+
+
+def test_apply_post_rules_with_context_falls_back_without_source_kw(monkeypatch):
+    import post_rules_replay as prr
+
+    prr._compat_warned = False
+    calls: list = []
+
+    def legacy_apply(text, l1, l2, l2_map):
+        calls.append((text, l1, l2, l2_map))
+        return l1, l2, {}
+
+    fake_mod = type(sys)("qwen_ollama")
+    fake_mod.apply_classification_post_rules = legacy_apply  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "qwen_ollama", fake_mod)
+
+    l1, l2, flags = prr.apply_post_rules_with_context(
+        "test", "服务类", "", {}, source="APP", vin="SCC123"
+    )
+    assert (l1, l2, flags) == ("服务类", "", {})
+    assert len(calls) == 1

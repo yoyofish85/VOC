@@ -37,6 +37,7 @@ from evaluate_accuracy import (  # noqa: E402
     normalize_l2,
 )
 from time_utils import row_review_time  # noqa: E402
+from post_rules_replay import apply_post_rules_with_context  # noqa: E402
 
 SELECT_REVIEWED = """
 SELECT opinion_id, original_text, source, vin, review_l1, review_l2,
@@ -168,12 +169,12 @@ def fetch_rows(
 
 
 def replay_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    from qwen_ollama import apply_classification_post_rules, load_l2_whitelist  # noqa: E402
+    from qwen_ollama import load_l2_whitelist  # noqa: E402
 
     l2_map = load_l2_whitelist()
     enriched: List[Dict[str, Any]] = []
     for d in rows:
-        nl1, nl2, flags = apply_classification_post_rules(
+        nl1, nl2, flags = apply_post_rules_with_context(
             d["text"],
             d["model_l1"],
             d["model_l2"],
