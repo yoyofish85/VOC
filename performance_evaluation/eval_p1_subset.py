@@ -65,6 +65,8 @@ def _row_dict(row) -> Dict[str, Any]:
         "text": str(row["original_text"] or "").strip(),
         "human_l1": canonicalize_l1_label(row["review_l1"]),
         "human_l2": str(row["review_l2"] or "").strip(),
+        "source": str(row["source"] or "").strip(),
+        "vin": str(row["vin"] or "").strip(),
         "model_l1": "",
         "model_l2": "",
     }
@@ -74,7 +76,7 @@ def load_reviewed(conn) -> List[Dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT opinion_id, original_text, review_l1, review_l2,
-               v3_label_meta, model_class, model_keyword
+               source, vin, v3_label_meta, model_class, model_keyword
         FROM opinion WHERE review_status = 1
         """
     ).fetchall()
@@ -115,7 +117,12 @@ def replay_rules(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     enriched: List[Dict[str, Any]] = []
     for d in rows:
         nl1, nl2, flags = apply_classification_post_rules(
-            d["text"], d["model_l1"], d["model_l2"], l2_map
+            d["text"],
+            d["model_l1"],
+            d["model_l2"],
+            l2_map,
+            source=d["source"],
+            vin=d["vin"],
         )
         nd = dict(d)
         nd["replay_l1"] = canonicalize_l1_label(nl1)

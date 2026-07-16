@@ -52,3 +52,14 @@ def test_charging_station_and_supplier_are_lfc():
 def test_vehicle_side_charging_is_car_charging():
     assert charging_l2_target("车辆充电功率低，只有20kW") == "车端充电问题"
     assert charging_l2_target("预约充电后车辆没有开始充电") == "车端充电问题"
+
+
+def test_post_rules_accept_context_without_changing_default_behavior():
+    from qwen_ollama import apply_classification_post_rules, load_l2_whitelist
+
+    l2_map = load_l2_whitelist()
+    legacy = apply_classification_post_rules("纯表扬", "非问题", "", l2_map)
+    contextual = apply_classification_post_rules(
+        "纯表扬", "非问题", "", l2_map, source="", vin=""
+    )
+    assert legacy == contextual

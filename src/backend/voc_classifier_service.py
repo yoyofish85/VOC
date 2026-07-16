@@ -224,11 +224,11 @@ def run_batch_classify(
         if len(opinion_ids) == 0:
             conn.close()
             return {"code": 400, "msg": "opinion_ids 为空", "updated": 0}
-        q = f"SELECT id, opinion_id, original_text, country, review_status FROM opinion WHERE opinion_id IN ({','.join(['?']*len(opinion_ids))})"
+        q = f"SELECT id, opinion_id, original_text, country, source, vin, review_status FROM opinion WHERE opinion_id IN ({','.join(['?']*len(opinion_ids))})"
         c.execute(q, opinion_ids)
     elif upload_batch:
         c.execute(
-            "SELECT id, opinion_id, original_text, country, review_status FROM opinion WHERE upload_batch = ?",
+            "SELECT id, opinion_id, original_text, country, source, vin, review_status FROM opinion WHERE upload_batch = ?",
             (upload_batch,),
         )
     else:
@@ -316,6 +316,8 @@ def run_batch_classify(
                                 text,
                                 db_path=db_path,
                                 country=row["country"] or "",
+                                source=row["source"] or "",
+                                vin=row["vin"] or "",
                                 host=ollama_host,
                             )
                             break

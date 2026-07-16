@@ -2016,7 +2016,13 @@ def _is_lfc_consult_text(text: str) -> bool:
 
 
 def apply_classification_post_rules(
-    text: str, l1: str, l2: str, l2_map: Dict[str, List[str]]
+    text: str,
+    l1: str,
+    l2: str,
+    l2_map: Dict[str, List[str]],
+    *,
+    source: str = "",
+    vin: str = "",
 ) -> Tuple[str, str, Dict[str, bool]]:
     """14B 白名单输出之后的规则链（可离线重放，用于子集评估 / 不写库）。
 
@@ -2077,6 +2083,8 @@ def _post_process_classify_result(
     *,
     model: str = QWEN_MODEL,
     match_type: str = "qwen14b_structured",
+    source: str = "",
+    vin: str = "",
 ) -> Optional[Dict[str, Any]]:
     """统一处理 LLM 分类 JSON：白名单校验、规则后处理、置信度和标记补充。"""
     raw_l1 = str(obj.get("l1") or obj.get("一级标签") or "").strip()
@@ -2095,7 +2103,9 @@ def _post_process_classify_result(
         risk = "低"
     conf = float(obj.get("confidence") or 0.75)
 
-    l1, l2, rule_flags = apply_classification_post_rules(text, wl1, wl2, l2_map)
+    l1, l2, rule_flags = apply_classification_post_rules(
+        text, wl1, wl2, l2_map, source=source, vin=vin
+    )
     guard = bool(rule_flags.get("non_issue_guard"))
     if guard:
         conf = max(conf, 0.82)
@@ -2242,7 +2252,16 @@ def _extract_l3_phrases(text: str) -> str:
         return ""
 
 
-def classify_text(text: str, *, db_path: str, country: str = "", model: str = QWEN_MODEL, host: str = QWEN_HOST) -> Dict[str, Any]:
+def classify_text(
+    text: str,
+    *,
+    db_path: str,
+    country: str = "",
+    source: str = "",
+    vin: str = "",
+    model: str = QWEN_MODEL,
+    host: str = QWEN_HOST,
+) -> Dict[str, Any]:
     text = (text or "").strip()
     if not text:
         return {"l1": "", "l2": "", "l3": "", "keywords": [], "risk_level": "低", "confidence": 0.0, "match_type": "qwen_empty"}
@@ -2275,6 +2294,8 @@ def classify_text(text: str, *, db_path: str, country: str = "", model: str = QW
                 l2_map,
                 model=mlx_model_name,
                 match_type=_mlx_match_type(),
+                source=source,
+                vin=vin,
             )
         except Exception as e:
             return {
@@ -2365,6 +2386,8 @@ def classify_text(text: str, *, db_path: str, country: str = "", model: str = QW
         l2_map,
         model=model,
         match_type="qwen14b_structured",
+        source=source,
+        vin=vin,
     )
     if processed is None:
         return {

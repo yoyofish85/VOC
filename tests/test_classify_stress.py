@@ -70,7 +70,7 @@ def _seed(main_mod, n: int) -> None:
     )
 
 
-def _fake_classify(text, *, db_path, country="", model=None, host=None):
+def _fake_classify(text, *, db_path, country="", source="", vin="", model=None, host=None):
     time.sleep(0.003)  # 模拟单条 14B 推理耗时
     return {
         "l1": "产品质量类",
@@ -143,9 +143,17 @@ def test_classify_300_rows_incremental_commit_no_lock(classify_env, monkeypatch)
     assert elapsed < 30.0, f"300 条分类应在 30s 内完成，实际 {elapsed:.1f}s"
 
 
-def _slow_classify(text, *, db_path, country="", model=None, host=None):
+def _slow_classify(text, *, db_path, country="", source="", vin="", model=None, host=None):
     time.sleep(0.006)
-    return _fake_classify(text, db_path=db_path, country=country, model=model, host=host)
+    return _fake_classify(
+        text,
+        db_path=db_path,
+        country=country,
+        source=source,
+        vin=vin,
+        model=model,
+        host=host,
+    )
 
 
 def test_classify_results_committed_incrementally(classify_env, monkeypatch) -> None:
