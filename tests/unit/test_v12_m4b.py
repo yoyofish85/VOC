@@ -319,3 +319,15 @@ def test_lju_vin_prevents_emira_label():
     )
     assert l2 != "Emira问题"
     assert flags.get("vin_vehicle_hint")
+
+
+def test_charging_consult_stays_non_issue_in_full_chain():
+    l2_map = load_l2_whitelist()
+    l1, l2, flags = apply_classification_post_rules(
+        "用户咨询成都希顿国际广场闪充站如何开启充电",
+        "非问题",
+        "",
+        l2_map,
+    )
+    assert (l1, l2) == ("非问题", "")
+    assert not flags.get("charging_guard")

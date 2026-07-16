@@ -1533,17 +1533,18 @@ def _pick_lfc_l2(text: str, l2_map: Dict[str, List[str]]) -> str:
 def apply_charging_domain_guard(
     text: str, l1: str, l2: str, l2_map: Dict[str, List[str]]
 ) -> Tuple[str, str, bool]:
-    """LFC/充电/家充桩域：业务咨询/反馈/投诉不得归「非问题/咨询与表扬」。
+    """LFC/充电/家充桩域：投诉/故障/占位争议不得归「非问题」；纯咨询/了解保持非问题。
 
-    诊断显示 cap 列全为 '-'，213 条 L2 反向误判均为 14B 直接输出；
-    典型误例：家充桩到货咨询、占位费不认可、充电功率询问、地锁无下一步按钮。
+    与 _lfc_blocks_positive_capture 口径一致：人工复核批次中「咨询家充/闪充如何使用」
+    多为非问题，不应被 guard 拉回产品质量类。
     """
     t = (text or "").strip()
     if not t or not _LFC_CHARGING_DOMAIN.search(t):
         return l1, l2, False
     l1s = (l1 or "").strip()
-    l2s = (l2 or "").strip()
     if not is_non_issue_l1(l1s):
+        return l1, l2, False
+    if not _lfc_blocks_positive_capture(t):
         return l1, l2, False
     nl1 = "产品质量类"
     nl2 = _pick_lfc_l2(t, l2_map)

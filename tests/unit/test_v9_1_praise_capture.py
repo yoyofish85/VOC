@@ -92,6 +92,14 @@ def test_charging_guard_after_nonissue():
     l1, l2, hit = apply_charging_domain_guard(
         "用户咨询家充桩什么时候到货", "非问题", "", l2_map
     )
+    assert not hit and l1 == "非问题" and l2 == ""
+
+
+def test_charging_guard_complaint_from_nonissue():
+    l2_map = load_l2_whitelist()
+    l1, l2, hit = apply_charging_domain_guard(
+        "占位费不认可,充电跳枪无法完成", "非问题", "", l2_map
+    )
     assert hit and l1 == "产品质量类"
 
 

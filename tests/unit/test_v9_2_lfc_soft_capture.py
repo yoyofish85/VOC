@@ -71,12 +71,13 @@ def test_post_rules_lfc_consult_end_to_end():
 
 
 def test_charging_guard_still_fixes_regression():
-    """模型=非问题 + LFC 咨询 → 守卫仍拉回产品质量（回归集安全）。"""
+    """模型=非问题 + LFC 投诉/故障 → 守卫仍拉回产品质量。"""
     l2_map = load_l2_whitelist()
     l1, l2, flags = apply_classification_post_rules(
-        "用户咨询家充桩什么时候到货",
+        "占位费不认可,充电跳枪无法完成",
         "非问题",
         "",
         l2_map,
     )
-    assert l1 == "产品质量类" and flags.get("charging_guard")
+    assert l1 == "产品质量类"
+    assert flags.get("charging_guard") or flags.get("non_issue_guard")

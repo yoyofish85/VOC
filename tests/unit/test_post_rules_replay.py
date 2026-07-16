@@ -28,7 +28,7 @@ def test_post_rules_praise_from_service():
     assert l1 == "非问题" and l2 == "" and flags.get("pos_captured")
 
 
-def test_post_rules_lfc_regression_stays_product():
+def test_post_rules_lfc_consult_stays_non_issue():
     l2_map = load_l2_whitelist()
     l1, l2, flags = apply_classification_post_rules(
         "用户咨询家充桩什么时候到货",
@@ -36,7 +36,8 @@ def test_post_rules_lfc_regression_stays_product():
         "",
         l2_map,
     )
-    assert l1 == "产品质量类" and flags.get("charging_guard")
+    assert l1 == "非问题" and l2 == ""
+    assert not flags.get("charging_guard")
 
 
 def test_explain_block_true_negative():

@@ -47,6 +47,9 @@ def test_app_narrative_with_explicit_fault_is_not_captured():
     assert not app_narrative_should_be_non_issue(
         "自驾途中车机黑屏无法导航，要求尽快解决", source="APP"
     )
+    assert not app_narrative_should_be_non_issue(
+        "分享一下ForMe的后备箱，再弄个收纳箱和储物网兜", source="APP"
+    )
 
 
 def test_vehicle_family_from_vin():
