@@ -24,6 +24,9 @@ def test_assistance_request_is_non_issue():
 def test_assistance_with_service_complaint_is_not_captured():
     assert not assistance_should_be_non_issue("爆胎后联系售后两小时无人响应，投诉服务差")
     assert not assistance_should_be_non_issue("保养后车辆故障无法启动，要求维修")
+    assert not assistance_should_be_non_issue(
+        "车辆发生单方事故，想协调拖车拖至门店维修，需要报价"
+    )
 
 
 def test_app_narrative_is_non_issue_only_for_app_source():

@@ -8,7 +8,8 @@ _ASSIST_DOMAIN = re.compile(r"爆胎|扎钉|轮胎没气|交通事故|发生事�
 _ASSIST_INTENT = re.compile(r"咨询|询问|需要|协助|安排|预约|上门|如何处理|怎么办|求助")
 _EXPLICIT_ISSUE = re.compile(
     r"投诉|不满|态度差|无人响应|无法联系|未处理|乱收费|收费不合理|"
-    r"维修失败|保养后|故障|异常|无法启动|黑屏|失灵|质量问题|受伤"
+    r"维修失败|保养后|故障|异常|无法启动|黑屏|失灵|质量问题|受伤|"
+    r"报价|定损|剐蹭|损伤|维修"
 )
 _APP_SOURCE = re.compile(r"app|应用", re.I)
 _NARRATIVE = re.compile(r"分享|自驾|游记|旅途|旅程|一路|风景|日常用车|提车日记|打卡")

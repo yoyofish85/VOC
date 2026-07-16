@@ -212,3 +212,39 @@ def test_l1_rebalance_product_to_service_delivery():
     assert flags.get("l1_category_rebalance")
     assert l2_out == "交付问题", l2_out
 
+
+def test_o1_assistance_overrides_service_to_non_issue():
+    l2_map = load_l2_whitelist()
+    l1, l2, flags = apply_classification_post_rules(
+        "车辆扎钉爆胎，需要协助安排道路救援拖车",
+        "服务类",
+        "售后服务问题",
+        l2_map,
+    )
+    assert (l1, l2) == ("非问题", "")
+    assert flags.get("context_non_issue")
+
+
+def test_o1_does_not_hide_service_complaint():
+    l2_map = load_l2_whitelist()
+    l1, _, flags = apply_classification_post_rules(
+        "爆胎后联系售后两小时无人响应，投诉服务差",
+        "服务类",
+        "售后服务问题",
+        l2_map,
+    )
+    assert l1 == "服务类"
+    assert not flags.get("context_non_issue")
+
+
+def test_o3_app_narrative_overrides_experience_to_non_issue():
+    l2_map = load_l2_whitelist()
+    l1, l2, flags = apply_classification_post_rules(
+        "周末自驾去了莫干山，一路风景很好，分享日常用车体验",
+        "体验需求类",
+        "车机智能化",
+        l2_map,
+        source="APP",
+    )
+    assert (l1, l2) == ("非问题", "")
+    assert flags.get("context_non_issue")

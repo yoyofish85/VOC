@@ -38,6 +38,11 @@ from taxonomy_normalize import (  # noqa: E402
     try_canonicalize_l1,
 )
 
+from classification_context_rules import (  # noqa: E402
+    app_narrative_should_be_non_issue,
+    assistance_should_be_non_issue,
+)
+
 logger = logging.getLogger("voc.qwen_ollama")
 
 QWEN_MODEL = os.environ.get("VOC_QWEN_MODEL", "qwen2.5:14b-instruct-q4_K_M")
@@ -2071,6 +2076,16 @@ def apply_classification_post_rules(
         flags.pop("consult_misclass", None)
         flags.pop("charging_guard", None)
         flags.pop("srv_quality_guard", None)
+
+    context_capture = assistance_should_be_non_issue(text) or app_narrative_should_be_non_issue(
+        text, source=source
+    )
+    if context_capture:
+        l1, l2 = "非问题", ""
+        flags["context_non_issue"] = True
+        flags.pop("charging_guard", None)
+        flags.pop("srv_quality_guard", None)
+        flags.pop("l1_category_rebalance", None)
 
     l1, l2 = strip_non_issue_l2(l1, l2)
     return l1, l2, flags
