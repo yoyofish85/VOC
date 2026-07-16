@@ -36,7 +36,9 @@ if [[ ! -f "$ADAPTER_PATH/adapters.safetensors" && ! -f "$ADAPTER_PATH/adapter_c
 fi
 
 echo "[1/3] 单条推理 smoke（5 条）..."
-SMOKE_OK=$("$PYTHON" - <<PY
+# 直接打印到终端（勿捕获 stdout，否则失败时看不到原因）
+set +e
+"$PYTHON" - <<PY
 import sys, time
 sys.path.insert(0, "src/backend")
 from qwen_ollama import classify_text
@@ -58,17 +60,17 @@ for text, exp in tests:
     if ok:
         correct += 1
     mark = "OK" if ok else "FAIL"
-    print(f"  [{mark}] exp={exp} act={act}/{r.get('l2','')} type={mt} [{time.time()-t0:.0f}s]")
+    print(f"  [{mark}] exp={exp} act={act}/{r.get('l2','')} type={mt} [{time.time()-t0:.0f}s]", flush=True)
     if mt == "mlx_load_failed":
-        print("  MLX 加载失败，终止验证")
+        print("  MLX 加载失败，终止验证", flush=True)
         sys.exit(2)
-print(f"smoke: {correct}/{len(tests)}")
+print(f"smoke: {correct}/{len(tests)}", flush=True)
 sys.exit(0 if correct >= 3 else 1)
 PY
-) || SMOKE_RC=$?
-SMOKE_RC=${SMOKE_RC:-0}
+SMOKE_RC=$?
+set -e
 if [[ "$SMOKE_RC" -ne 0 ]]; then
-  echo "[失败] smoke 正确率不足 3/5 或 MLX 加载失败"
+  echo "[失败] smoke 正确率不足 3/5 或 MLX 加载失败 (exit=$SMOKE_RC)"
   exit "$SMOKE_RC"
 fi
 
