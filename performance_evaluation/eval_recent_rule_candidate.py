@@ -244,6 +244,34 @@ def export_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
             )
 
 
+def summarize_l2_broken(rows: List[Dict[str, Any]], limit: int = 8) -> None:
+    """门禁失败时打印 L2 broken 归因，便于下一轮收窄规则。"""
+    from collections import Counter
+
+    broken = []
+    for r in rows:
+        human_l1 = canonicalize_l1_label(str(r.get("human_l1") or ""))
+        model_l1 = canonicalize_l1_label(str(r.get("model_l1") or ""))
+        human_l2 = normalize_l2(str(r.get("human_l2") or ""))
+        if not human_l2 or not _l2_eval_applicable(human_l1, model_l1):
+            continue
+        m2 = normalize_l2(str(r.get("model_l2") or ""))
+        r2 = normalize_l2(str(r.get("replay_l2") or ""))
+        if m2 == human_l2 and r2 != human_l2:
+            broken.append(r)
+    if not broken:
+        return
+    print(f"\nL2 broken detail (n={len(broken)}):")
+    print("  rule_flags:", Counter(_format_flags(r.get("rule_flags") or {}) for r in broken))
+    for r in broken[:limit]:
+        flags = _format_flags(r.get("rule_flags") or {})
+        print(
+            f"  [{flags}] {r.get('model_l2')}→{r.get('replay_l2')} "
+            f"(human={r.get('human_l2')}) id={r.get('opinion_id')}"
+        )
+        print(f"    {(r.get('text') or '')[:100]}")
+
+
 def print_report(result: Dict[str, Any]) -> None:
     print(f"L1 total={result['l1_total']}")
     print(
@@ -306,6 +334,8 @@ def main(argv: List[str] | None = None) -> int:
         print(f"CSV: {args.export_csv.resolve()}")
 
     if result["l1_broken"] > args.max_l1_broken or result["l2_broken"] > args.max_l2_broken:
+        if result["l2_broken"] > args.max_l2_broken:
+            summarize_l2_broken(replayed)
         print("FAIL: broken gate exceeded")
         return 2
     return 0

@@ -42,6 +42,9 @@ from classification_context_rules import (  # noqa: E402
     app_narrative_should_be_non_issue,
     assistance_should_be_non_issue,
     charging_l2_target,
+    should_apply_context_non_issue,
+    should_skip_charging_l2_flip,
+    station_status_inquiry_preserves_lfc,
     vehicle_family,
 )
 
@@ -1668,6 +1671,8 @@ def apply_l1_category_rebalance(
     if l1c not in ("服务类", "产品质量类", "体验需求类"):
         return l1, l2, False
     t = text or ""
+    if re.search(r"丢了钥匙|丢钥匙|钥匙丢了", t):
+        return l1, l2, False
     srv = bool(_SRV_TILT.search(t))
     prod = bool(_PROD_TILT.search(t))
     exp = bool(_EXP_TILT.search(t))
@@ -2088,6 +2093,13 @@ def apply_classification_post_rules(
     if captured and charging_guard_applied and _is_lfc_consult_text(text):
         # 回归保护：非问题→charging_guard→产品质量 后，不再 LFC 咨询捕获回非问题
         captured = False
+    if (
+        captured
+        and canonicalize_l1_label(l1) == "产品质量类"
+        and (l2 or "").strip() == "LFC问题"
+        and station_status_inquiry_preserves_lfc(text)
+    ):
+        captured = False
     if captured:
         flags["pos_captured"] = True
         l1, l2 = nl1c, nl2c
@@ -2095,8 +2107,8 @@ def apply_classification_post_rules(
         flags.pop("charging_guard", None)
         flags.pop("srv_quality_guard", None)
 
-    context_capture = assistance_should_be_non_issue(text) or app_narrative_should_be_non_issue(
-        text, source=source
+    context_capture = should_apply_context_non_issue(
+        text, l1, l2, source=source, vin=vin
     )
     if context_capture:
         l1, l2 = "非问题", ""
@@ -2108,17 +2120,18 @@ def apply_classification_post_rules(
     if canonicalize_l1_label(l1) == "产品质量类":
         product_opts = l2_map.get("产品质量类") or []
         target_l2 = charging_l2_target(text)
-        if target_l2 and target_l2 in product_opts and target_l2 != l2:
+        if (
+            target_l2
+            and target_l2 in product_opts
+            and target_l2 != l2
+            and not should_skip_charging_l2_flip(text, l2, target_l2)
+        ):
             l2 = target_l2
             flags["charging_l2_boundary"] = True
 
         family = vehicle_family(vin)
         if family == "emira" and "Emira问题" in product_opts and l2 in ("",):
             l2 = "Emira问题"
-            flags["vin_vehicle_hint"] = True
-        elif family == "electric" and l2 == "Emira问题":
-            candidates = [x for x in product_opts if x != "Emira问题"]
-            l2 = _nearest("故障-通用", candidates) if candidates else ""
             flags["vin_vehicle_hint"] = True
 
     l1, l2 = strip_non_issue_l2(l1, l2)

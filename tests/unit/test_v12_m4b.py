@@ -321,7 +321,7 @@ def test_scc_vin_does_not_override_generic_fault_l2():
     assert not flags.get("vin_vehicle_hint")
 
 
-def test_lju_vin_prevents_emira_label():
+def test_lju_vin_does_not_override_emira_label():
     l2_map = load_l2_whitelist()
     _, l2, flags = apply_classification_post_rules(
         "用户反馈车辆故障灯亮",
@@ -330,8 +330,53 @@ def test_lju_vin_prevents_emira_label():
         l2_map,
         vin="LJUBMSA14RK008070",
     )
-    assert l2 != "Emira问题"
-    assert flags.get("vin_vehicle_hint")
+    assert l2 == "Emira问题"
+    assert not flags.get("vin_vehicle_hint")
+
+
+def test_o1_does_not_break_correct_lfc_l2():
+    l2_map = load_l2_whitelist()
+    text = "客户反馈西安金鹰国际购物中心闪充站不能使用，需要回复"
+    l1, l2, flags = apply_classification_post_rules(
+        text, "产品质量类", "车端充电问题", l2_map
+    )
+    assert l1 == "产品质量类"
+    assert l2 == "车端充电问题"
+    assert not flags.get("context_non_issue")
+
+
+def test_o1_does_not_break_service_pickup_request():
+    l2_map = load_l2_whitelist()
+    text = "用户反馈：预约了周四的保养，可以安排人过来取车吗"
+    l1, l2, flags = apply_classification_post_rules(
+        text, "服务类", "交付问题", l2_map
+    )
+    assert l1 == "服务类"
+    assert l2 == "交付问题"
+    assert not flags.get("context_non_issue")
+
+
+def test_pos_capture_preserves_lfc_station_inquiry():
+    l2_map = load_l2_whitelist()
+    text = "用户询问西安金鹰国际购物中心闪充站修好了没。催促时间。"
+    l1, l2, flags = apply_classification_post_rules(
+        text, "产品质量类", "LFC问题", l2_map
+    )
+    assert l1 == "产品质量类"
+    assert l2 == "LFC问题"
+    assert not flags.get("pos_captured")
+
+
+def test_supplier_charge_abort_keeps_car_charging_l2():
+    l2_map = load_l2_whitelist()
+    text = (
+        "用户反馈在浩瀚能源充电出现充电中止的情况，担心车辆问题，预约明天到售后检查"
+    )
+    _, l2, flags = apply_classification_post_rules(
+        text, "产品质量类", "车端充电问题", l2_map
+    )
+    assert l2 == "车端充电问题"
+    assert not flags.get("charging_l2_boundary")
 
 
 def test_charging_consult_stays_non_issue_in_full_chain():
@@ -354,6 +399,16 @@ def test_station_inquiry_keeps_car_charging_l2():
     )
     assert l2 == "车端充电问题"
     assert not flags.get("charging_l2_boundary")
+
+
+def test_station_fault_fixes_empty_l2():
+    l2_map = load_l2_whitelist()
+    text = "成都希顿国际广场闪充站不能使用"
+    _, l2, flags = apply_classification_post_rules(
+        text, "产品质量类", "", l2_map
+    )
+    assert l2 == "LFC问题"
+    assert flags.get("charging_l2_boundary")
 
 
 def test_range_inquiry_stays_non_issue():

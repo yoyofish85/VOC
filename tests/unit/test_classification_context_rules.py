@@ -12,6 +12,9 @@ from classification_context_rules import (  # noqa: E402
     app_narrative_should_be_non_issue,
     assistance_should_be_non_issue,
     charging_l2_target,
+    should_apply_context_non_issue,
+    should_skip_charging_l2_flip,
+    station_status_inquiry_preserves_lfc,
     vehicle_family,
 )
 
@@ -73,11 +76,63 @@ def test_vehicle_family_from_vin():
 def test_charging_station_and_supplier_are_lfc():
     assert charging_l2_target("蔚来充电桩已下线，站点无法使用") == "LFC问题"
     assert charging_l2_target("浩瀚供应商的闪充站一直不可用") == "LFC问题"
+    assert charging_l2_target("蔚来闪充站修好了没，询问什么时候维修完成") == "LFC问题"
+    assert charging_l2_target("充电桩已下线，需要回复进度") == "LFC问题"
 
 
 def test_station_status_inquiry_does_not_force_lfc():
     assert charging_l2_target("西安金鹰国际购物中心闪充站不能使用，需要回复") == ""
     assert charging_l2_target("闪充站修好了没，询问什么时候维修完成") == ""
+
+
+def test_weak_station_non_inquiry_maps_to_lfc():
+    assert charging_l2_target("成都希顿国际广场闪充站不能使用") == "LFC问题"
+
+
+def test_skip_charging_flip_on_inquiry_only():
+    text = "西安金鹰国际购物中心闪充站不能使用，需要回复"
+    assert should_skip_charging_l2_flip(text, "车端充电问题", "LFC问题")
+    assert not should_skip_charging_l2_flip(text, "", "LFC问题")
+    assert not should_skip_charging_l2_flip(
+        "蔚来充电桩已下线，需要回复", "车端充电问题", "LFC问题"
+    )
+
+
+def test_skip_lfc_to_car_when_station_domain_present():
+    text = "浩瀚闪充站一直不可用，车辆预约充电没有开始"
+    assert should_skip_charging_l2_flip(text, "LFC问题", "车端充电问题")
+
+
+def test_context_non_issue_skips_confirmed_charging_l2():
+    text = "成都希顿国际广场闪充站不能使用"
+    assert not should_apply_context_non_issue(
+        text, "产品质量类", "LFC问题", vin=""
+    )
+    assert should_apply_context_non_issue(
+        "用户反馈需要预约保养", "产品质量类", "LFC问题", vin=""
+    )
+
+
+def test_context_non_issue_skips_confirmed_service_l2():
+    text = "用户反馈：预约了周四的保养，可以安排人过来取车吗"
+    assert not should_apply_context_non_issue(
+        text, "服务类", "交付问题", vin=""
+    )
+
+
+def test_station_inquiry_preserves_lfc_for_pos_capture():
+    assert station_status_inquiry_preserves_lfc(
+        "用户询问西安金鹰国际购物中心闪充站修好了没。催促时间。"
+    )
+
+
+def test_car_side_dominant_skips_lfc_flip():
+    text = (
+        "用户反馈在浩瀚能源充电出现充电中止，担心车辆问题，预约明天到售后检查"
+    )
+    assert should_skip_charging_l2_flip(text, "车端充电问题", "LFC问题")
+    text2 = "客户反馈充电桩故障，充一会会停止充电，桩显示红色，再次启动后同样几分钟后显示红色"
+    assert should_skip_charging_l2_flip(text2, "车端充电问题", "LFC问题")
 
 
 def test_vehicle_side_charging_is_car_charging():
