@@ -3,8 +3,8 @@
 > 本文档记录 V1.5 迭代中的**问题背景、改动内容、涉及文件与验证要点**，便于每次发版前核对「这次到底修了什么、没动什么」。  
 > 架构级 V3 标签体系说明见 [`VOC_V1.5_优化记录_v3.0.md`](./VOC_V1.5_优化记录_v3.0.md)。
 
-**最后更新**：2026-07-08  
-**适用分支**：VOC_V1.5 当前主开发线（`main`，含双启动脚本与服务器 MLX 验证）
+**最后更新**：2026-07-16  
+**适用分支**：VOC_V1.5 当前主开发线（`main`，含 O1–O4 上下文规则与 Release A/B dry-run 门禁）
 
 ---
 
@@ -38,6 +38,7 @@
 | R24 | MLX 准确率评估计划 | Track B 生产批次 + Track A holdout 对照；进化路线 | 📋 计划中 |
 | R25 | MVP 90–93% + 分步门禁 | 目标锁定；E0–E7 门禁；Track B 82.64% 已归档 | ⏳ 执行中 |
 | R26 | Ollama 测试运营 + 优化待办 | 每日 ~200 条；R1/R2 完成；三类边界问题记录 | ⏳ 测试中 |
+| R27 | O1–O4 上下文规则 + Release A/B 门禁 | 纯函数 O1–O4、近批次 dry-run；30 天 L2 broken=0 | ✅ 门禁通过 |
 
 ---
 
@@ -865,6 +866,76 @@ bash scripts/setup_server_venv.sh
 
 - R3 Ollama 近 **4 天**投喂正式 L1/L2（`eval_batch_accuracy.py --since-days 4`）
 - 全库 `evaluate_accuracy.py` 对比
+
+---
+
+### R27 · O1–O4 上下文规则与 Release A/B dry-run（2026-07-16）
+
+#### 实现概要
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| O1–O4 纯函数 | `src/backend/classification_context_rules.py` | 协助咨询、APP 叙事、VIN 车型、充电 L2 边界 |
+| 规则链接入 | `src/backend/qwen_ollama.py` | `source`/`vin` 贯通；O1/O3 在 pos_capture 之后；O4/O2 在产品质量类 L2 校正 |
+| 离线评估 | `performance_evaluation/eval_recent_rule_candidate.py` | 近 N 天 before/after、fixed/broken/net；FAIL 时打印 L2 broken 明细 |
+| 兼容层 | `performance_evaluation/post_rules_replay.py` | 旧版 backend 无 source/vin 时降级重放 |
+
+计划全文：`docs/superpowers/plans/2026-07-16-ollama-accuracy-90-93.md`
+
+#### Release A（近 7 天，831 条）— ✅ 已通过（v2，charging_guard 修复后）
+
+| 指标 | before | after | fixed | broken | net | 门禁 |
+|------|--------|-------|-------|--------|-----|------|
+| L1 | 82.31% | **84.60%** | 21 | 2 | +19 | fixed≥20, broken≤8, net≥15 ✓ |
+| L2 | 85.32% | **88.53%** | 9 | 2 | +7 | broken≤3 ✓ |
+
+CSV：`performance_evaluation/exports/o1_o3_candidate_20260716_v2.csv`
+
+> **说明**：v2 在 `charging_guard` 纯咨询放行修复后通过。v5 规则收窄后建议在服务器复跑 7 天命令确认 L1 仍达标（见下方命令）。
+
+#### Release B（近 30 天，2685/746 L2 样本）— ✅ 已通过（v5）
+
+| 指标 | before | after | fixed | broken | net | 门禁 |
+|------|--------|-------|-------|--------|-----|------|
+| L1 | 83.24% | **84.28%** | 30 | 2 | +28 | broken≤8 ✓ |
+| L2 | 81.23% | **84.45%** | 24 | **0** | +24 | broken≤3 ✓ |
+
+CSV：`performance_evaluation/exports/o2_o4_candidate_20260716_v5.csv`
+
+**v5 关键收窄（相对 v1 broken=16）：**
+
+- O1：已正确的服务类 L2（取车/拖车/爆胎/贴膜）不再翻非问题
+- O4：纯咨询、车端担忧、充一会停止等不强行翻 LFC
+- pos_capture：闪充站「修好了没」类咨询保留 LFC 二级
+- O2：仅 SCC + 空 L2 → Emira（移除 LJU 误改 Emira）
+
+**Commit 链（R27）：** `fix: Release B v5 门禁通过 — O1/O4/pos_capture 分层收窄`（接 `fix: 收窄 O1/O2/O4`、`fix: 充电纯咨询保持非问题` 等）
+
+#### 评估命令（服务器）
+
+```bash
+# Release A — 近 7 天
+python3 performance_evaluation/eval_recent_rule_candidate.py \
+  --since-days 7 --max-l1-broken 8 --max-l2-broken 3 \
+  --export-csv performance_evaluation/exports/o1_o3_candidate_YYYYMMDD.csv
+
+# Release B — 近 30 天
+python3 performance_evaluation/eval_recent_rule_candidate.py \
+  --since-days 30 --max-l1-broken 8 --max-l2-broken 3 \
+  --export-csv performance_evaluation/exports/o2_o4_candidate_YYYYMMDD.csv
+```
+
+#### 部署与生效
+
+- **线上分类**：`code_deploy/update.zip` 含 `src/backend/` 三文件；部署后重启后端，**新批次**自动走 O1–O4
+- **勿**对全库执行 `apply_post_rules_to_v3 --write`；历史 v3 按需 patch
+- **评估脚本**不在 zip 内，需单独 rsync `performance_evaluation/`
+
+#### 下一步（MVP 90–93%）
+
+1. 服务器复跑 Release A（7 天）确认 v5 下 L1 仍 ≥84%、broken≤8
+2. `./code_deploy/package_code.sh` 部署生产
+3. 连续 2 个独立批次（各 ≥200 条）L1≥90% 验证（计划 Task 9+）
 
 ---
 
