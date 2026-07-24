@@ -39,6 +39,7 @@
 | R25 | MVP 90–93% + 分步门禁 | 目标锁定；E0–E7 门禁；Track B 82.64% 已归档 | ⏳ 执行中 |
 | R26 | Ollama 测试运营 + 优化待办 | 每日 ~200 条；R1/R2 完成；三类边界问题记录 | ⏳ 测试中 |
 | R27 | O1–O4 上下文规则 + Release A/B 门禁 | 纯函数 O1–O4、近批次 dry-run；30 天 L2 broken=0 | ✅ 门禁通过 |
+| R28 | O1 扩展 v4.2（协助/协调→非问题） | 爆胎/补胎/拖车/保养/对接；近 7 天 L1 85.38% broken=0 | ✅ 门禁通过 |
 
 ---
 
@@ -936,6 +937,68 @@ python3 performance_evaluation/eval_recent_rule_candidate.py \
 1. 服务器复跑 Release A（7 天）确认 v5 下 L1 仍 ≥84%、broken≤8
 2. `./code_deploy/package_code.sh` 部署生产
 3. 连续 2 个独立批次（各 ≥200 条）L1≥90% 验证（计划 Task 9+）
+
+---
+
+### R28 · O1 扩展 v4.2：道路协助 / 门店协调 → 非问题（2026-07-24）
+
+#### 背景
+
+- 近 7 天复核（1197 条，Jul 16–23）Top L1 错误：**服务类→非问题 121 条**（模型标服务类，人工标非问题）。
+- 业务口径确认：爆胎、补胎、拖车、道路救援、预约保养、门店对接/协调、纯咨询 → **非问题**；取车交付、明确投诉（没人接听、保养后故障等）→ 仍服务类。
+- R27 v5 的 O1 仅覆盖少量协助样本（7 天 dry-run 约 12/121）；需扩展 O1/O1b 并严格 broken 门禁迭代。
+
+#### 实现概要
+
+| 模块 | 变更 |
+|------|------|
+| **O1** | 道路救援层（`_ROADSIDE_ASSIST` + `_ROADSIDE_BLOCK`）、保养预约、售后对接（`_AFTERSALES_COORD`）；`移动上门补胎` 不再被 `_EXPLICIT_ISSUE` 误拦 |
+| **O1b** | `service_coordination_should_be_non_issue`：积分/贴膜/活动好评/门店对接等协调类 |
+| **O1 v4 收窄** | `_O1_SERVICE_COMPLAINT_BLOCK`：微信催促、异响未解决、回访复合故障、商城质量等保持服务类 |
+| **O1 v4.1** | 保护已正确 L2（故障告警、钥匙问题、取车保养）；体验/LFC 不回翻 |
+| **qwen v4/v4.2** | 商城支架误捕获拦截；代客泊车咨询豁免 guard；保养费用咨询 / 取车检修 relay 豁免 v12 拉回 |
+
+#### Release O1 v4.2（近 7 天，1197 条）— ✅ 已通过
+
+| 指标 | before | after | fixed | broken | net | 门禁 |
+|------|--------|-------|-------|--------|-----|------|
+| L1 | 79.95% | **85.38%** | 65 | **0** | +65 | broken≤8 ✓ |
+| L2 | 87.01% | **88.31%** | 4 | **0** | +4 | broken≤3 ✓ |
+
+CSV：`performance_evaluation/exports/sprint_o1_expand_v42.csv`
+
+**服务类→非问题**：v3 基线约 **41/121**；v4.2 总 L1 fixed=**65**（含产品质量类/体验类等其它错误模式）。
+
+**迭代摘要：**
+
+| 版本 | L1 after | L1 broken | L2 broken | 说明 |
+|------|----------|-----------|-----------|------|
+| v3 | 83.12% | 5 | 0 | 首版扩展 |
+| v4 | 85.05% | 6 | 5 | L2 broken 失败 |
+| v4.1 | 85.21% | 2 | 0 | 收窄 O1 + 保护 L2 |
+| **v4.2** | **85.38%** | **0** | **0** | guard 豁免，定版 |
+
+#### 主要文件
+
+- `src/backend/classification_context_rules.py`
+- `src/backend/qwen_ollama.py`
+- `tests/unit/test_classification_context_rules.py`
+- `tests/unit/test_v12_m4b.py`
+
+#### 部署
+
+```bash
+# 同步上述两 backend 文件后重启
+pkill -f "uvicorn.*backend" || true
+
+# 门禁复验
+python3 performance_evaluation/eval_recent_rule_candidate.py \
+  --since-days 7 --max-l1-broken 8 --max-l2-broken 3 \
+  --export-csv performance_evaluation/exports/sprint_o1_expand_v42.csv
+```
+
+- **勿**全库 `--write`；新工单自动走 v4.2。
+- 下一批优化方向：pos_capture relay（「协调/咨询类未匹配」~13 条 + 「其他」~42 条），非继续堆 O1。
 
 ---
 

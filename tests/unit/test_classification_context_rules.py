@@ -12,6 +12,7 @@ from classification_context_rules import (  # noqa: E402
     app_narrative_should_be_non_issue,
     assistance_should_be_non_issue,
     charging_l2_target,
+    service_coordination_should_be_non_issue,
     should_apply_context_non_issue,
     should_skip_charging_l2_flip,
     station_status_inquiry_preserves_lfc,
@@ -24,6 +25,16 @@ def test_assistance_request_is_non_issue():
     assert assistance_should_be_non_issue("咨询保养预约，需要协助安排时间")
     assert assistance_should_be_non_issue("用户反馈需要预约保养")
     assert assistance_should_be_non_issue("车辆有什么问题，需要到店检测")
+    assert assistance_should_be_non_issue(
+        "阮婷婷用户轮胎扎钉漏气，需要拖车到门店售后更换轮胎"
+    )
+    assert assistance_should_be_non_issue("开繁花出门扎钉瘪胎，联系中心移动上门补胎")
+    assert assistance_should_be_non_issue("客户反馈今天需要做个保养")
+    assert assistance_should_be_non_issue("用户反馈有售后维修需求，需要温州售后门店对接")
+    assert assistance_should_be_non_issue(
+        "用户轮胎爆胎，需要拖车，要求售后支持安排道路救援"
+    )
+    assert assistance_should_be_non_issue("用户反馈需要补胎，联系门店安排移动上门")
 
 
 def test_assistance_blocks_service_delay_and_fault():
@@ -49,6 +60,12 @@ def test_assistance_with_service_complaint_is_not_captured():
     )
     assert not assistance_should_be_non_issue(
         "保养后车辆故障无法启动，要求到店检测"
+    )
+    assert not assistance_should_be_non_issue(
+        "客户反馈目前还没人添加微信，为其反馈催促"
+    )
+    assert not service_coordination_should_be_non_issue(
+        "反馈：内饰异响去门店检查2次了，上门检查1次还没解决，门店是否可以提供代步车"
     )
 
 
@@ -117,6 +134,36 @@ def test_context_non_issue_skips_confirmed_service_l2():
     text = "用户反馈：预约了周四的保养，可以安排人过来取车吗"
     assert not should_apply_context_non_issue(
         text, "服务类", "交付问题", vin=""
+    )
+
+
+def test_service_coordination_from_recent_error_pool():
+    samples = (
+        "用户询问收到积分提醒，大概有多少数额",
+        "用户反馈需要救援，胎压100，目前需要拖车到门店售后更换轮胎",
+        "用户反馈下了个维修单，需要为其催促确认下",
+        "北京客户反馈购买了商城车膜，需要门店主动来联系对接，什么时候可以进店贴膜",
+        "用户反馈有售后维修需求，需要温州售后门店对接",
+        "客户反馈今天需要做个保养",
+        "用户反馈想下午前往哈尔滨门店看一看FORME",
+        "接到夏季专属服务活动通知，售后服务还是挺到位的，耐心解答",
+    )
+    for text in samples:
+        assert service_coordination_should_be_non_issue(text), text
+        assert should_apply_context_non_issue(
+            text, "服务类", "售后服务问题", vin=""
+        ), text
+
+
+def test_service_coordination_blocks_real_complaints():
+    assert not service_coordination_should_be_non_issue(
+        "保养后车辆落锁差点夹手，需要检查车辆"
+    )
+    assert not should_apply_context_non_issue(
+        "保养后车辆落锁差点夹手，需要检查车辆",
+        "服务类",
+        "售后服务问题",
+        vin="",
     )
 
 

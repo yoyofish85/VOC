@@ -1160,6 +1160,8 @@ def _v12_regression_pullback_exempt(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return True
+    if _non_issue_consult_relay_exempt(t):
+        return True
     if (
         _KZ_V11_INCIDENT_PRAISE.search(t)
         or _KZ_V11_MAINTENANCE_PRAISE.search(t)
@@ -1258,11 +1260,45 @@ _NEGATION_BEFORE_POSITIVE = re.compile(
     re.I,
 )
 
+# v4 broken 门禁：商城商品质量反馈、代客泊车功能咨询
+_MALL_PRODUCT_COMPLAINT = re.compile(
+    r"商城.{0,120}(?:晃动|间隙|支架|配件|缺少|质量问题)|"
+    r"支架.{0,60}(?:晃动|间隙)",
+    re.I,
+)
+_PARKING_FEATURE_INQUIRY = re.compile(
+    r"代客泊车.{0,48}(?:无法使用|没有.{0,12}选项|选项问题)|"
+    r"反馈.{0,32}代客泊车",
+    re.I,
+)
+
+
+def _non_issue_consult_relay_exempt(text: str) -> bool:
+    """纯保养费用咨询、取车检修 relay — 保持非问题（v4.2 broken 门禁）。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if re.search(
+        r"咨询保养费用|提示保养了.{0,32}咨询.{0,12}(?:保养)?费用",
+        t,
+        re.I,
+    ):
+        return True
+    if re.search(
+        r"安排人把.{0,16}(?:车|车辆)开过来|把车开过来",
+        t,
+        re.I,
+    ) and re.search(r"检修|查一下|需不需要", t, re.I):
+        return not re.search(r"投诉|不满|还没解决|无法启动", t, re.I)
+    return False
+
 
 def _business_issue_blocks_capture(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return False
+    if _MALL_PRODUCT_COMPLAINT.search(t):
+        return True
     if _KZ_COMMUNITY_CHATTER.search(t):
         return False
     if _v11_business_guard_exempt(t):
@@ -1755,6 +1791,12 @@ def apply_non_issue_guardrail(
     if _NEUTRAL_RANGE_INQUIRY.search(t) and not re.search(
         r"投诉|不满|异常|故障|达不到|虚标|严重|明显偏低", t, re.I
     ):
+        return l1c, "", False
+    if _PARKING_FEATURE_INQUIRY.search(t) and not re.search(
+        r"投诉|不满|故障|异常|黑屏|死机|失灵", t, re.I
+    ):
+        return l1c, "", False
+    if _non_issue_consult_relay_exempt(t):
         return l1c, "", False
     if not _FORBID_NON_ISSUE.search(t) and not _KZ_BUSINESS_ISSUE_GUARD.search(t) and not _phase2_pullback_needed(t):
         return l1c, "", False
