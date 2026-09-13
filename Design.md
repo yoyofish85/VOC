@@ -244,6 +244,8 @@ export OLLAMA_HOST=http://127.0.0.1:11434
 
 全量 reclassify ~2362 条 ≈ **155 分钟**。
 
+14B 是受旧机 36GB 统一内存限制的选型（放不下 32B 常驻）。换 M5 Max 128GB 后该约束解除，候选模型与迁移门禁见 `docs/plans/2026-09-12-l3-insight-hardware-roadmap.md` §2 —— **换模型前必须过 holdout A/B 与近 7 天 dry-run 门禁**，因为 O1–O4 / v4.2 规则链是针对 14B 输出分布调优的。
+
 ### 7.4 服务器 Python 环境（MLX）
 
 ```bash

@@ -105,6 +105,11 @@
 | Holdout A/B | MVP 第 2 月 | `ab_compare_models.py` |
 | 模型灰度 | MVP 第 3 月 | 新模型先试低置信 / 新批次 |
 | 规则自动挖掘 | 未规划 | 当前人工 + Agent 改规则 |
+| **L3 定位与汇报主题体系** | 规划中 | 产品质量+服务类先定版约 214 个定位 L3，再唯一映射至约 30–45 个汇报主题；体验需求暂缓，L3 暂不进 KPI |
+| **汇报洞察字段** | 规划中 | `intent` / `expected_action` / `severity` / `urgency` / `repeat_signal` → 故障生命周期 + 跨 L2 抱怨聚集 |
+| **32B 模型灰度** | 规划中 | M5 Max 128GB 到位后，经 A/B + dry-run 门禁再决定换默认模型 |
+
+以上三项详细方案见 `docs/plans/2026-09-12-l3-insight-hardware-roadmap.md`。
 
 ---
 
