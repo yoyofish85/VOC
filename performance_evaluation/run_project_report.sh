@@ -9,7 +9,7 @@ cd "$ROOT"
 DAYS="${1:-7}"
 STAMP="$(date +%Y%m%d)"
 EXPORT="performance_evaluation/exports/project_stages_${STAMP}.md"
-PYTHON="${VOC_PYTHON:-$ROOT/.venv/bin/python3}"
+PYTHON="${VOC_PYTHON:-$ROOT/.venv/bin/python}"
 
 if [[ ! -x "$PYTHON" ]]; then
   echo "错误：未找到可执行的项目 Python：$PYTHON" >&2
@@ -17,8 +17,16 @@ if [[ ! -x "$PYTHON" ]]; then
   exit 1
 fi
 
+PYTHON_VERSION="$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 14) else 1)'; then
+  echo "错误：项目 Python 必须为 3.11–3.13，当前为 ${PYTHON_VERSION}。" >&2
+  echo "请运行 bash scripts/setup_server_venv.sh 重建 .venv。" >&2
+  exit 1
+fi
+
 echo "========== VOC 项目汇报数据采集（近 ${DAYS} 天）=========="
 echo "项目根: $ROOT"
+echo "项目 Python: $PYTHON ($PYTHON_VERSION)"
 echo ""
 
 echo ">>> [健康检查]"
@@ -62,5 +70,14 @@ if [[ -f performance_evaluation/report_project_stages.py ]]; then
   echo ""
   echo "已导出: $EXPORT"
 fi
+
+echo ""
+echo ">>> [准确率时间线]"
+TIMELINE_ARGS=()
+MANUAL_SEED="performance_evaluation/exports/accuracy_timeline_manual_seed.csv"
+if [[ -f "$MANUAL_SEED" ]]; then
+  TIMELINE_ARGS+=(--manual-csv "$MANUAL_SEED")
+fi
+"$PYTHON" performance_evaluation/export_accuracy_timeline.py "${TIMELINE_ARGS[@]}"
 
 echo "========== 完成 =========="
