@@ -173,16 +173,25 @@
 
     <!-- 批量工具条 -->
     <div class="batch-toolbar">
-      <el-button
-        type="primary"
-        size="large"
-        class="btn-confirm-archive"
-        :disabled="!selectedRows.length"
-        :loading="batchConfirmLoading"
-        @click="confirmWriteArchive"
-      >
-        确认归档 ({{ selectedRows.length }})
-      </el-button>
+        <el-button
+          type="success"
+          size="large"
+          :disabled="!selectedRows.length"
+          :loading="confirmCorrectLoading"
+          @click="confirmSelectedAsCorrect"
+        >
+          确认所选正确 ({{ selectedRows.length }})
+        </el-button>
+        <el-button
+          type="primary"
+          size="large"
+          class="btn-confirm-archive"
+          :disabled="!selectedRows.length"
+          :loading="batchConfirmLoading"
+          @click="confirmWriteArchive"
+        >
+          确认归档 ({{ selectedRows.length }})
+        </el-button>
       <el-button
         type="success"
         size="large"
@@ -208,7 +217,7 @@
       </el-button>
       <el-button :disabled="!selectedBatch" @click="exportCsv">导出当前批次 CSV</el-button>
       <span class="batch-hint"
-        >「确认归档」将当前勾选的 {{ selectedRows.length }} 行确认并写入年度 CSV。「归档年度数据」检查整批完成状态并显示批次准确率。</span
+        >「确认所选正确」将勾选行标为已复核（人工标签为空时采用模型结果，不改模型分类）。「确认归档」再写入年度 CSV。「归档年度数据」检查整批完成状态并显示批次准确率。</span
       >
     </div>
 
@@ -335,19 +344,41 @@
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="人工复核" width="200" fixed="right">
+      <el-table-column label="人工复核" width="220" fixed="right">
         <template #default="scope">
-          <el-select
-            v-model="scope.row.review_status"
-            placeholder="状态"
-            size="small"
-            style="width: 100px"
-            @change="() => scheduleRowAutoSave(scope.row)"
-          >
-            <el-option label="未复核" :value="0" />
-            <el-option label="已复核" :value="1" />
-            <el-option label="存疑" :value="2" />
-          </el-select>
+          <div class="review-status-cell">
+            <el-button
+              v-if="Number(scope.row.review_status) !== 1"
+              type="success"
+              size="small"
+              @click="confirmRowAsCorrect(scope.row)"
+            >
+              确认正确
+            </el-button>
+            <el-tag v-else type="success" size="small">已复核</el-tag>
+            <el-dropdown
+              trigger="click"
+              @command="(cmd) => onReviewStatusCommand(scope.row, cmd)"
+            >
+              <el-button link size="small" title="其他状态">⋯</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-if="Number(scope.row.review_status) !== 2"
+                    command="pending"
+                  >
+                    标为存疑
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="Number(scope.row.review_status) !== 0"
+                    command="unreviewed"
+                  >
+                    改回未复核
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
           <el-input
             v-model="scope.row.review_note"
             placeholder="备注"
@@ -472,6 +503,7 @@ import { ref, onMounted, watch, computed, defineExpose, onUnmounted, nextTick } 
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Search, UploadFilled, Cpu, Operation } from '@element-plus/icons-vue'
 import { highlightL2Option, rowL2FilterMethod, matchL2Label } from '@/utils/l2Search'
+import { applyConfirmAsCorrect } from '@/utils/reviewConfirm'
 import {
   getReviewListApi,
   getOpinionDetailApi,
@@ -533,6 +565,7 @@ const yearOptions = ref(['2024', '2025', '2026'])
 const summaryYearFilter = ref('')
 const summaryMonthPicker = ref('')
 const batchConfirmLoading = ref(false)
+const confirmCorrectLoading = ref(false)
 const batchStatusLoading = ref(false)
 const draftSaveLoading = ref(false)
 const classifyProgressText = ref('')
@@ -1472,6 +1505,74 @@ const tableRowClassName = ({ row }) => {
   return cls.join(' ')
 }
 
+const confirmRowAsCorrect = (row) => {
+  if (!row) return
+  const result = applyConfirmAsCorrect(row, cleanV3L1(row), cleanV3L2(row))
+  if (!result.ok) {
+    ElMessage.warning(result.error)
+    return
+  }
+  Object.assign(row, result.row)
+  scheduleRowAutoSave(row, 0)
+}
+
+const onReviewStatusCommand = (row, cmd) => {
+  if (!row) return
+  if (cmd === 'pending') row.review_status = 2
+  else if (cmd === 'unreviewed') row.review_status = 0
+  else return
+  scheduleRowAutoSave(row, 0)
+}
+
+const confirmSelectedAsCorrect = async () => {
+  if (!selectedRows.value.length) return
+  await flushPendingRowSaves()
+  const failed = []
+  const okRows = []
+  for (const row of selectedRows.value) {
+    const result = applyConfirmAsCorrect(row, cleanV3L1(row), cleanV3L2(row))
+    if (!result.ok) {
+      failed.push({ id: row.opinion_id, error: result.error })
+    } else {
+      okRows.push({ row, next: result.row })
+    }
+  }
+  if (!okRows.length) {
+    ElMessage.warning(failed[0]?.error || '所选行无法确认')
+    return
+  }
+  for (const { row, next } of okRows) {
+    Object.assign(row, next)
+  }
+  confirmCorrectLoading.value = true
+  const now = isoReviewTimestamp()
+  try {
+    const reviews = okRows.map(({ row }) => ({
+      opinion_id: row.opinion_id,
+      review_status: 1,
+      review_note: row.review_note,
+      review_l1: row.review_l1,
+      review_l2: row.review_l2,
+      reviewer: reviewerName.value || undefined,
+      reviewed_at: now
+    }))
+    const res = await batchSaveReviewApi({ reviews })
+    if (res.code === 200) {
+      const extra = failed.length ? `；${failed.length} 条未确认（缺标签）` : ''
+      ElMessage.success(`已确认 ${okRows.length} 条正确${extra}`)
+      await getReviewList()
+      getYearlySummary()
+      emit('refresh')
+    } else {
+      ElMessage.error(res.msg || '确认失败')
+    }
+  } catch {
+    ElMessage.error('确认请求失败')
+  } finally {
+    confirmCorrectLoading.value = false
+  }
+}
+
 const batchSaveReviews = async () => {
   if (!selectedRows.value.length) return
   const now = new Date().toISOString().slice(0, 19)
@@ -2162,6 +2263,13 @@ onUnmounted(() => {
   background: #f5f7fa;
   border-radius: 6px;
 }
+.review-status-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
 .drawer-actions {
   margin-top: 20px;
   display: flex;
