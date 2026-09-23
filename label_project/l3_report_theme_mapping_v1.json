@@ -1,0 +1,1153 @@
+{
+  "_meta": {
+    "version": "v1",
+    "theme_mapping_version": "v1",
+    "taxonomy_version": "gold_l3_standard_v1",
+    "status": "final_pending_business_confirm",
+    "finalized_on": "2026-09-23",
+    "scope": [
+      "产品质量类",
+      "服务类"
+    ],
+    "formal_theme_count": 33,
+    "mapped_l3_count": 214,
+    "rules": [
+      "每个 L1/L2/L3 完整路径有且仅有一个 primary_theme_id",
+      "secondary_theme_ids 不参与正式计数",
+      "T99 其他-待归类不混入正式主题合计"
+    ]
+  },
+  "themes": {
+    "T-Q-01": {
+      "name": "充电设施与场站运营",
+      "l1": "产品质量类",
+      "owner": "充电业务",
+      "definition": "闪充站、家充桩、三方充电站及场站维护",
+      "includes": "LFC问题",
+      "excludes": "车端充电功能、闪充运营权益"
+    },
+    "T-Q-02": {
+      "name": "车端充电功能",
+      "l1": "产品质量类",
+      "owner": "充电业务/电子电器",
+      "definition": "车辆无法充电、功率/预约/盖板等车端充电功能",
+      "includes": "车端充电问题",
+      "excludes": "场站设施与闪充权益运营"
+    },
+    "T-Q-03": {
+      "name": "智能驾驶辅助",
+      "l1": "产品质量类",
+      "owner": "智驾",
+      "definition": "行车智驾、辅助驾驶、AEB、巡航、ADView等",
+      "includes": "AD4非泊车类",
+      "excludes": "泊车异常"
+    },
+    "T-Q-04": {
+      "name": "自动泊车与环视感知",
+      "l1": "产品质量类",
+      "owner": "智驾",
+      "definition": "泊车及环视/流媒体/雷达等泊车感知相关",
+      "includes": "泊车异常及强相关感知成像",
+      "excludes": "行车智驾主路径"
+    },
+    "T-Q-05": {
+      "name": "座舱车机系统稳定性",
+      "l1": "产品质量类",
+      "owner": "座舱软件",
+      "definition": "车机异常、网络、蓝牙、Carplay、记录仪、座椅控制等系统稳定性",
+      "includes": "座舱系统连接类",
+      "excludes": "导航语音影音娱乐"
+    },
+    "T-Q-06": {
+      "name": "导航语音与影音娱乐",
+      "l1": "产品质量类",
+      "owner": "座舱软件",
+      "definition": "导航、语音、音乐音响、HUD、文言、天气卡片等",
+      "includes": "座舱影音导航语音类",
+      "excludes": "车机死机断网"
+    },
+    "T-Q-07": {
+      "name": "手机APP远程车控",
+      "l1": "产品质量类",
+      "owner": "移动应用",
+      "definition": "APP闪退、登录、连接、车控、空调控制、定位",
+      "includes": "APP连接车控类",
+      "excludes": "积分账号状态显示"
+    },
+    "T-Q-08": {
+      "name": "APP账号积分与状态显示",
+      "l1": "产品质量类",
+      "owner": "移动应用",
+      "definition": "演示模式、积分、状态显示、文言、监管提示等",
+      "includes": "APP账号积分显示类",
+      "excludes": "远程车控失败"
+    },
+    "T-Q-09": {
+      "name": "电子电器与灯光",
+      "l1": "产品质量类",
+      "owner": "电子电器",
+      "definition": "空调、雷达、无线充、车窗、灯光、充电口盖等",
+      "includes": "电子电器问题+灯类故障",
+      "excludes": "座舱软件"
+    },
+    "T-Q-10": {
+      "name": "车门开闭与后备箱",
+      "l1": "产品质量类",
+      "owner": "车身",
+      "definition": "门把手、灵动门、车门、后备箱开闭",
+      "includes": "车门问题",
+      "excludes": "钥匙识别"
+    },
+    "T-Q-11": {
+      "name": "钥匙与无感解锁",
+      "l1": "产品质量类",
+      "owner": "车身/电子",
+      "definition": "数字/三角/卡片钥匙及解锁落锁",
+      "includes": "钥匙问题",
+      "excludes": "门把手机械卡滞"
+    },
+    "T-Q-12": {
+      "name": "底盘转向与制动",
+      "l1": "产品质量类",
+      "owner": "底盘",
+      "definition": "悬架、转向、制动、跑偏",
+      "includes": "底盘问题",
+      "excludes": "异响"
+    },
+    "T-Q-13": {
+      "name": "动力驱动系统",
+      "l1": "产品质量类",
+      "owner": "动力",
+      "definition": "动力受限、无法挂挡",
+      "includes": "动力异常",
+      "excludes": "故障灯告警"
+    },
+    "T-Q-14": {
+      "name": "故障告警与仪表提示",
+      "l1": "产品质量类",
+      "owner": "质量/电子",
+      "definition": "各类故障灯与告警提示",
+      "includes": "故障告警",
+      "excludes": "实际失效本体"
+    },
+    "T-Q-15": {
+      "name": "异响与NVH",
+      "l1": "产品质量类",
+      "owner": "质量",
+      "definition": "各类异响",
+      "includes": "异响问题",
+      "excludes": "功能失效"
+    },
+    "T-Q-16": {
+      "name": "OTA升级体验",
+      "l1": "产品质量类",
+      "owner": "OTA",
+      "definition": "OTA推送安装及升级后异常",
+      "includes": "OTA更新问题",
+      "excludes": "非OTA同类问题"
+    },
+    "T-Q-17": {
+      "name": "内饰与座舱硬件",
+      "l1": "产品质量类",
+      "owner": "内饰",
+      "definition": "仪表台、大屏硬件、按键",
+      "includes": "内饰问题",
+      "excludes": "座舱软件"
+    },
+    "T-Q-18": {
+      "name": "外饰与车身附件",
+      "l1": "产品质量类",
+      "owner": "外饰",
+      "definition": "尾翼等外饰附件",
+      "includes": "外饰问题",
+      "excludes": "灯类"
+    },
+    "T-Q-19": {
+      "name": "Emira经典车质量",
+      "l1": "产品质量类",
+      "owner": "经典车",
+      "definition": "Emira专属质量问题",
+      "includes": "Emira问题",
+      "excludes": "其他经典车"
+    },
+    "T-Q-20": {
+      "name": "Evora/Exige/Elise经典车",
+      "l1": "产品质量类",
+      "owner": "经典车",
+      "definition": "Evora/Exige/Elise质量问题",
+      "includes": "三车型问题",
+      "excludes": "Emira"
+    },
+    "T-S-01": {
+      "name": "销售接待与沟通体验",
+      "l1": "服务类",
+      "owner": "销售",
+      "definition": "销售态度、响应、直播间、门店环境、电话骚扰",
+      "includes": "接待沟通类",
+      "excludes": "政策价格、承诺兑现"
+    },
+    "T-S-02": {
+      "name": "销售政策与营销体验",
+      "l1": "服务类",
+      "owner": "销售/市场",
+      "definition": "销售政策、营销宣传、车款、活动报名体验",
+      "includes": "政策营销类",
+      "excludes": "接待态度"
+    },
+    "T-S-03": {
+      "name": "客服热线与保险金融",
+      "l1": "服务类",
+      "owner": "客户服务",
+      "definition": "客服电话、保险、金融配套",
+      "includes": "客服保险金融类",
+      "excludes": "售后维修"
+    },
+    "T-S-04": {
+      "name": "销售承诺兑现",
+      "l1": "服务类",
+      "owner": "销售",
+      "definition": "权益未兑现、交期承诺、配置不一致、用户权益",
+      "includes": "销售承诺未能兑现+权益相关",
+      "excludes": "一般接待"
+    },
+    "T-S-05": {
+      "name": "试驾体验",
+      "l1": "服务类",
+      "owner": "销售",
+      "definition": "试驾全流程体验",
+      "includes": "试驾体验不良",
+      "excludes": "交付"
+    },
+    "T-S-06": {
+      "name": "整车交付体验",
+      "l1": "服务类",
+      "owner": "交付",
+      "definition": "交期、交付状态、资料配件、权益开通",
+      "includes": "交付问题+销售中交付体验/品质",
+      "excludes": "退款取消"
+    },
+    "T-S-07": {
+      "name": "订单取消与退款",
+      "l1": "服务类",
+      "owner": "销售运营",
+      "definition": "退款进度与各类取消退定",
+      "includes": "订单取消/退款",
+      "excludes": "正常交付抱怨"
+    },
+    "T-S-08": {
+      "name": "售后维修与备件",
+      "l1": "服务类",
+      "owner": "售后",
+      "definition": "维修时长、备件、维修质量、索赔等待、质保",
+      "includes": "维修备件类",
+      "excludes": "响应代步"
+    },
+    "T-S-09": {
+      "name": "售后响应与道路救援",
+      "l1": "服务类",
+      "owner": "售后",
+      "definition": "响应及时性、代步、救援、服务缺失与体验",
+      "includes": "响应救援体验类",
+      "excludes": "维修工艺备件"
+    },
+    "T-S-10": {
+      "name": "闪充运营与权益机制",
+      "l1": "服务类",
+      "owner": "充电运营",
+      "definition": "闪充预约占位费权益机制",
+      "includes": "闪充机制问题",
+      "excludes": "场站硬件"
+    },
+    "T-S-11": {
+      "name": "积分账户与发放",
+      "l1": "服务类",
+      "owner": "会员运营",
+      "definition": "积分到账补偿过期发放错误",
+      "includes": "积分发放问题",
+      "excludes": "APP积分显示"
+    },
+    "T-S-12": {
+      "name": "车品商城与附件服务",
+      "l1": "服务类",
+      "owner": "商城运营",
+      "definition": "商城商品物流安装及增值服务商品",
+      "includes": "车品商城问题",
+      "excludes": "整车交付"
+    },
+    "T-S-13": {
+      "name": "以租代购与三方租赁",
+      "l1": "服务类",
+      "owner": "金融租赁",
+      "definition": "三方租赁车质量与售后",
+      "includes": "以租代购",
+      "excludes": "本品直售"
+    },
+    "T99": {
+      "name": "其他-待归类",
+      "l1": "",
+      "owner": "VOC运营",
+      "definition": "无合适定位L3时的兜底主题，不计入正式主题合计",
+      "includes": "其他-待归类",
+      "excludes": "全部正式主题",
+      "counts_in_formal_total": false
+    }
+  },
+  "l3_mapping": {
+    "服务类/订单取消/退款/询问催促退款进度": {
+      "primary_theme_id": "T-S-07",
+      "secondary_theme_ids": []
+    },
+    "服务类/订单取消/退款/自身原因取消订单": {
+      "primary_theme_id": "T-S-07",
+      "secondary_theme_ids": []
+    },
+    "服务类/订单取消/退款/因质量问题要求退车": {
+      "primary_theme_id": "T-S-07",
+      "secondary_theme_ids": []
+    },
+    "服务类/订单取消/退款/交付时间原因取消订单": {
+      "primary_theme_id": "T-S-07",
+      "secondary_theme_ids": []
+    },
+    "服务类/订单取消/退款/因权益问题要求退定": {
+      "primary_theme_id": "T-S-07",
+      "secondary_theme_ids": []
+    },
+    "服务类/订单取消/退款/因承诺未兑现": {
+      "primary_theme_id": "T-S-07",
+      "secondary_theme_ids": []
+    },
+    "服务类/订单取消/退款/取消订单原因不明确": {
+      "primary_theme_id": "T-S-07",
+      "secondary_theme_ids": []
+    },
+    "服务类/订单取消/退款/因配置问题要求退定": {
+      "primary_theme_id": "T-S-07",
+      "secondary_theme_ids": []
+    },
+    "服务类/闪充机制问题/盗卖充电权益": {
+      "primary_theme_id": "T-S-10",
+      "secondary_theme_ids": []
+    },
+    "服务类/闪充机制问题/超时占位费问题": {
+      "primary_theme_id": "T-S-10",
+      "secondary_theme_ids": []
+    },
+    "服务类/闪充机制问题/免费闪充权益升级导致部分车主不满": {
+      "primary_theme_id": "T-S-10",
+      "secondary_theme_ids": []
+    },
+    "服务类/闪充机制问题/闪充取消预约抱怨": {
+      "primary_theme_id": "T-S-10",
+      "secondary_theme_ids": []
+    },
+    "服务类/闪充机制问题/闪充预约机制不合理": {
+      "primary_theme_id": "T-S-10",
+      "secondary_theme_ids": []
+    },
+    "服务类/闪充机制问题/非营业时间抱怨": {
+      "primary_theme_id": "T-S-10",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾路程/时间短": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾路线与预期不符": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾讲解不主动/专业": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/无试驾车": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾礼品未兑现": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾等待时间长": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾路线拥堵": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾专员驾驶水平差": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾车状态差": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾非预期车型": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾建议": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/无智驾体验": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/试驾体验不良/试驾过程差": {
+      "primary_theme_id": "T-S-05",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/销售服务差": {
+      "primary_theme_id": "T-S-01",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/对销售政策不满": {
+      "primary_theme_id": "T-S-02",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/营销宣传差": {
+      "primary_theme_id": "T-S-02",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/交付体验差": {
+      "primary_theme_id": "T-S-06",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/客服电话无人响应": {
+      "primary_theme_id": "T-S-03",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/保险服务问题": {
+      "primary_theme_id": "T-S-03",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/直播间服务态度差": {
+      "primary_theme_id": "T-S-01",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/销售服务响应不及时": {
+      "primary_theme_id": "T-S-01",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/用户权益": {
+      "primary_theme_id": "T-S-04",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/金融问题": {
+      "primary_theme_id": "T-S-03",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/交付品质问题": {
+      "primary_theme_id": "T-S-06",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/车款问题": {
+      "primary_theme_id": "T-S-02",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/赛道活动报名异常": {
+      "primary_theme_id": "T-S-02",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/公充权益取消导致抱怨": {
+      "primary_theme_id": "T-S-02",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/电话骚扰": {
+      "primary_theme_id": "T-S-01",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/赛道活动体验不佳": {
+      "primary_theme_id": "T-S-02",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售服务问题/门店环境差": {
+      "primary_theme_id": "T-S-01",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/维修/备件时间长": {
+      "primary_theme_id": "T-S-08",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/服务体验不佳": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/售后服务响应不及时": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/售后维修质量差": {
+      "primary_theme_id": "T-S-08",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/代步服务差": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/缺少售后服务": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/保养做完后车辆及APP仍然提示保养": {
+      "primary_theme_id": "T-S-08",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/索赔等待维修时间长": {
+      "primary_theme_id": "T-S-08",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/维保服务": {
+      "primary_theme_id": "T-S-08",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/道路救援车损": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/道路救援时间长": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/质保期时限疑问": {
+      "primary_theme_id": "T-S-08",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/商城服务": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/海外流量订阅抱怨": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/售后服务问题/车辆保护不当": {
+      "primary_theme_id": "T-S-09",
+      "secondary_theme_ids": []
+    },
+    "服务类/交付问题/MY26交付问题": {
+      "primary_theme_id": "T-S-06",
+      "secondary_theme_ids": []
+    },
+    "服务类/交付问题/整车交付状态不良": {
+      "primary_theme_id": "T-S-06",
+      "secondary_theme_ids": []
+    },
+    "服务类/交付问题/整车交付时间长": {
+      "primary_theme_id": "T-S-06",
+      "secondary_theme_ids": []
+    },
+    "服务类/交付问题/交付资料/配件不全": {
+      "primary_theme_id": "T-S-06",
+      "secondary_theme_ids": []
+    },
+    "服务类/交付问题/整车交付时间不明确": {
+      "primary_theme_id": "T-S-06",
+      "secondary_theme_ids": []
+    },
+    "服务类/交付问题/智驾权益包未开通": {
+      "primary_theme_id": "T-S-06",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售承诺未能兑现/相关权益未兑现": {
+      "primary_theme_id": "T-S-04",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售承诺未能兑现/承诺交付日期无法交车": {
+      "primary_theme_id": "T-S-04",
+      "secondary_theme_ids": []
+    },
+    "服务类/销售承诺未能兑现/车辆配置不一致": {
+      "primary_theme_id": "T-S-04",
+      "secondary_theme_ids": []
+    },
+    "服务类/积分发放问题/积分未到账": {
+      "primary_theme_id": "T-S-11",
+      "secondary_theme_ids": []
+    },
+    "服务类/积分发放问题/积分补偿": {
+      "primary_theme_id": "T-S-11",
+      "secondary_theme_ids": []
+    },
+    "服务类/积分发放问题/积分过期": {
+      "primary_theme_id": "T-S-11",
+      "secondary_theme_ids": []
+    },
+    "服务类/积分发放问题/积分发放错误": {
+      "primary_theme_id": "T-S-11",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/商品质量差": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/ETC服务": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/发货时间慢": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/到店安装问题": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/智驾服务": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/商品少发": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/实物与宣传不符": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/商品退货退款": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/新品建议": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/发错商品": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/车品商城问题/处理效率慢": {
+      "primary_theme_id": "T-S-12",
+      "secondary_theme_ids": []
+    },
+    "服务类/以租代购/三方租赁车质量问题": {
+      "primary_theme_id": "T-S-13",
+      "secondary_theme_ids": []
+    },
+    "服务类/以租代购/三方租赁车售后服务": {
+      "primary_theme_id": "T-S-13",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/智驾异常": {
+      "primary_theme_id": "T-Q-03",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/泊车异常": {
+      "primary_theme_id": "T-Q-04",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/辅助驾驶异常": {
+      "primary_theme_id": "T-Q-03",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/流媒体后视镜异常": {
+      "primary_theme_id": "T-Q-04",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/AVM异常": {
+      "primary_theme_id": "T-Q-04",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/雷达异常": {
+      "primary_theme_id": "T-Q-04",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/AVM黑屏": {
+      "primary_theme_id": "T-Q-04",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/AEB触发异常": {
+      "primary_theme_id": "T-Q-03",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/巡航速度不稳定": {
+      "primary_theme_id": "T-Q-03",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/AD4问题/ADView影像错误": {
+      "primary_theme_id": "T-Q-04",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/空调异常": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/激光雷达异常": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/无线充电功能异常": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/车窗升降异常": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/灯类故障": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/充电口盖开关异常": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/哨兵模式异常": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/后视镜异常": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/电子电器问题/影像异常问题": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/车机异常": {
+      "primary_theme_id": "T-Q-05",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/Carplay异常": {
+      "primary_theme_id": "T-Q-05",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/网络问题": {
+      "primary_theme_id": "T-Q-05",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/语音异常": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/导航定位漂移": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/蓝牙异常": {
+      "primary_theme_id": "T-Q-05",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/无互联网连接": {
+      "primary_theme_id": "T-Q-05",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/音乐播放异常": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/导航异常": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/天气卡片模糊": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/HUD屏异常问题": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/音响失效": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/行车记录仪录制异常": {
+      "primary_theme_id": "T-Q-05",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/文言错误或语音错误": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/收音机工作异常": {
+      "primary_theme_id": "T-Q-06",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/座舱问题/座椅问题": {
+      "primary_theme_id": "T-Q-05",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/刹车异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/行车异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/车辆内饰异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/方向机异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/悬架异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/方向盘异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/半轴异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/底盘异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/充电异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/异响问题/转弯时异响": {
+      "primary_theme_id": "T-Q-15",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/动力系统故障": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/转向故障": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/TPMS故障": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/制动故障灯告警": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/灯光告警": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/安全气囊故障警告": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/ESC故障报警": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/仪表报警": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/空气悬架系统故障": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/变速箱故障": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/方向盘无法调节故障告警": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/故障告警/蓄电池故障告警": {
+      "primary_theme_id": "T-Q-14",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/动力异常/动力受限": {
+      "primary_theme_id": "T-Q-13",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/动力异常/无法挂挡": {
+      "primary_theme_id": "T-Q-13",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车门问题/门把手卡滞": {
+      "primary_theme_id": "T-Q-10",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车门问题/灵动门异常": {
+      "primary_theme_id": "T-Q-10",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车门问题/车门无法打开": {
+      "primary_theme_id": "T-Q-10",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车门问题/后备箱异常": {
+      "primary_theme_id": "T-Q-10",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/底盘问题/悬架异常": {
+      "primary_theme_id": "T-Q-12",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/底盘问题/转向系统故障": {
+      "primary_theme_id": "T-Q-12",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/底盘问题/转向助力失效": {
+      "primary_theme_id": "T-Q-12",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/底盘问题/刹车制动失效": {
+      "primary_theme_id": "T-Q-12",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/底盘问题/车辆跑偏": {
+      "primary_theme_id": "T-Q-12",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/OTA更新问题/OTA更新不顺畅": {
+      "primary_theme_id": "T-Q-16",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/OTA更新问题/OTA推送异常": {
+      "primary_theme_id": "T-Q-16",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/OTA更新问题/OTA后功能消失": {
+      "primary_theme_id": "T-Q-16",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/OTA更新问题/OTA安装失败": {
+      "primary_theme_id": "T-Q-16",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/OTA更新问题/OTA后carplay功能异常（电话卡顿、声文转换功能异常等）": {
+      "primary_theme_id": "T-Q-16",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira发动机故障": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira空调故障": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira异响": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira油漆起泡": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/emira故障告警": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira无法启动": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira内饰问题": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira动力受限": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira变速箱故障": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira挂档异常": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Emira问题/Emira雷达故障": {
+      "primary_theme_id": "T-Q-19",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/数字钥匙创建分享失败": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/三角钥匙不工作": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/数字钥匙失效": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/三角钥匙耗电异常": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/卡片钥匙失效": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/数字钥匙靠近不解锁/不灵敏": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/车辆无法识别钥匙": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/离车不落锁": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/钥匙不能启动车辆": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/钥匙问题/自发解锁落锁": {
+      "primary_theme_id": "T-Q-11",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/LFC问题/闪充站问题": {
+      "primary_theme_id": "T-Q-01",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/LFC问题/家充桩问题": {
+      "primary_theme_id": "T-Q-01",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/LFC问题/三方充电站问题": {
+      "primary_theme_id": "T-Q-01",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/LFC问题/闪充站维护": {
+      "primary_theme_id": "T-Q-01",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/手机APP显示为演示模式": {
+      "primary_theme_id": "T-Q-08",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/APP闪退": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/APP功能异常": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/APP积分异常": {
+      "primary_theme_id": "T-Q-08",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/APP显示错误的状态": {
+      "primary_theme_id": "T-Q-08",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/手机APP无法连接汽车": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/手机APP无法登录": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/行车日志异常": {
+      "primary_theme_id": "T-Q-08",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/无法登陆APP": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/车控无法解锁车辆": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/APP定位不准": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/APP无车辆首付界面": {
+      "primary_theme_id": "T-Q-08",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/手机APP不能控制空调": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/手机APP车控不工作": {
+      "primary_theme_id": "T-Q-07",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/不良信息用户监管": {
+      "primary_theme_id": "T-Q-08",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/APP问题/文言错误": {
+      "primary_theme_id": "T-Q-08",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/灯类故障/前大灯不亮": {
+      "primary_theme_id": "T-Q-09",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/外饰问题/尾翼异常": {
+      "primary_theme_id": "T-Q-18",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车端充电问题/无法充电": {
+      "primary_theme_id": "T-Q-02",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车端充电问题/充电未按设定时间点开始或停止": {
+      "primary_theme_id": "T-Q-02",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车端充电问题/充电中断": {
+      "primary_theme_id": "T-Q-02",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车端充电问题/充电功率异常": {
+      "primary_theme_id": "T-Q-02",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车端充电问题/车机预约充电按钮问题": {
+      "primary_theme_id": "T-Q-02",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车端充电问题/车辆充电盖板不开盖": {
+      "primary_theme_id": "T-Q-02",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/车端充电问题/车端充电慢": {
+      "primary_theme_id": "T-Q-02",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/内饰问题/仪表台反光": {
+      "primary_theme_id": "T-Q-17",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/内饰问题/车机大屏不良": {
+      "primary_theme_id": "T-Q-17",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/内饰问题/按键异常": {
+      "primary_theme_id": "T-Q-17",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Evora问题/Evora无法启动": {
+      "primary_theme_id": "T-Q-20",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Exige问题/exige车辆故障": {
+      "primary_theme_id": "T-Q-20",
+      "secondary_theme_ids": []
+    },
+    "产品质量类/Elise问题/Elise车辆故障": {
+      "primary_theme_id": "T-Q-20",
+      "secondary_theme_ids": []
+    }
+  }
+}
