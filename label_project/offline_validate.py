@@ -801,6 +801,12 @@ class LabelMatcher:
             fc = self._first_cluster_l3(l1, l2)
             if fc:
                 return l1, l2, fc
+            try:
+                from label_project.l3_standard_resolver import PENDING_L3, feature_enabled
+            except ImportError:
+                from l3_standard_resolver import PENDING_L3, feature_enabled  # type: ignore
+            if feature_enabled() and l1 in ("产品质量类", "服务类"):
+                return l1, l2, PENDING_L3
             return l1, l2, "通用"
         tags = block.get("标签列表", []) if isinstance(block, dict) else []
         if l3 not in tags:
@@ -810,7 +816,15 @@ class LabelMatcher:
             elif tags:
                 l3 = tags[0]
             else:
-                l3 = "通用"
+                try:
+                    from label_project.l3_standard_resolver import PENDING_L3, feature_enabled
+                except ImportError:
+                    from l3_standard_resolver import PENDING_L3, feature_enabled  # type: ignore
+                l3 = (
+                    PENDING_L3
+                    if feature_enabled() and l1 in ("产品质量类", "服务类")
+                    else "通用"
+                )
         return l1, l2, l3
 
     def _resolve_l2_whitelist(self, text: str, l1: str, allow_llm: bool) -> str:
@@ -945,13 +959,21 @@ class LabelMatcher:
         }
 
     def _resolve_l3_after_l2(self, text: str, l1: str, l2: str) -> dict:
-        """三级：原体系规则 → 金标聚类 → 通用 → LLM。"""
+        """三级：原体系规则 → 金标聚类 →（可选）定位 L3 标准层 → 通用 → LLM。"""
         hit = self._best_l3_in_l2(text, l1, l2, min_score=9.0)
         if hit:
             return hit
         c3 = self._try_cluster_l3(text, l1, l2)
         if c3:
             return c3
+        # S5：产品质量/服务类优先用定版 L3；无命中写「其他-待归类」，不再写「通用」
+        try:
+            from label_project.l3_standard_resolver import resolve_l3_with_standard
+        except ImportError:  # 兼容直接在 label_project/ 下运行
+            from l3_standard_resolver import resolve_l3_with_standard  # type: ignore
+        std = resolve_l3_with_standard(text, l1, l2)
+        if std:
+            return std
         g3 = self._generic_l3_for_l2(l1, l2, text)
         if g3:
             return g3
