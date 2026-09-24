@@ -137,3 +137,31 @@ def test_theme_report_reconcile_and_export(tmp_path: Path):
     # header + rows
     lines = [ln for ln in csv_body.strip().splitlines() if ln.strip()]
     assert len(lines) - 1 == detail["count"]
+    assert "empty_hint" in report["meta"]
+    assert report["meta"]["theme_n"] == len(report["themes"])
+    assert report["meta"]["current_n"] >= 1
+
+
+def test_theme_report_empty_hint_when_no_rows(tmp_path: Path):
+    db = tmp_path / "empty.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        """
+        CREATE TABLE opinion (
+          opinion_id TEXT PRIMARY KEY,
+          original_text TEXT,
+          v3_l1 TEXT, v3_l2 TEXT, v3_l3 TEXT, v3_label_meta TEXT,
+          review_status INTEGER, review_l1 TEXT, review_l2 TEXT, review_l3 TEXT,
+          reviewed_at TEXT, create_time TEXT,
+          vin TEXT, phone TEXT, car_model TEXT, country TEXT,
+          reflow_synced INTEGER, upload_batch TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+    report = build_theme_report(
+        str(db), date_from="2026-09-01", date_to="2026-09-30", limit=100
+    )
+    assert report["themes"] == []
+    assert "日期" in (report.get("empty_hint") or "")

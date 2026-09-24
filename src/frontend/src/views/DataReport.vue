@@ -137,13 +137,16 @@
       <div class="lotus-card lotus-card-wide theme-evidence-card">
         <div class="lotus-card-head">
           <div>
-            <div class="lotus-card-title">主题证据链 · Theme → L3 → 原文</div>
-            <div class="lotus-card-title-en">汇报主题下钻 · 已复核/仅模型分层 · CSV 脱敏导出</div>
+            <div class="lotus-card-title">客诉主题台账</div>
+            <div class="lotus-card-title-en">
+              把同类客诉归到同一主题；点开可看问题分类和原始留言（已脱敏，可导出）
+            </div>
           </div>
           <el-button size="small" type="primary" :loading="themeLoading" @click="loadThemes">
-            加载主题
+            按日期查主题
           </el-button>
         </div>
+        <p v-if="themeStatusText" class="theme-status-line">{{ themeStatusText }}</p>
         <el-table
           v-if="themeList.length"
           :data="themeList"
@@ -153,20 +156,24 @@
           max-height="320"
           @row-click="onThemeRowClick"
         >
-          <el-table-column prop="theme_id" label="ID" width="90" />
-          <el-table-column prop="theme_name" label="主题" min-width="160" />
-          <el-table-column prop="count" label="条数" width="70" />
-          <el-table-column prop="reviewed_count" label="已复核" width="80" />
-          <el-table-column prop="model_only_count" label="仅模型" width="80" />
-          <el-table-column prop="prev_count" label="上期" width="70" />
-          <el-table-column prop="trend_state" label="趋势" width="80" />
-          <el-table-column label="操作" width="100" fixed="right">
+          <el-table-column prop="theme_id" label="编号" width="90" />
+          <el-table-column prop="theme_name" label="主题名称" min-width="160" />
+          <el-table-column prop="count" label="客诉条数" width="90" />
+          <el-table-column prop="reviewed_count" label="人工已复核" width="100" />
+          <el-table-column prop="model_only_count" label="仅模型分类" width="100" />
+          <el-table-column prop="prev_count" label="上期条数" width="90" />
+          <el-table-column prop="trend_state" label="较上期" width="80" />
+          <el-table-column label="操作" width="110" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" size="small" @click.stop="openTheme(row)">下钻</el-button>
+              <el-button link type="primary" size="small" @click.stop="openTheme(row)">查看原文</el-button>
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-else description="点击「加载主题」按当前日期范围聚合" :image-size="56" />
+        <el-empty
+          v-else
+          :description="themeEmptyDescription"
+          :image-size="56"
+        />
 
         <div v-if="themeDetail" class="theme-detail">
           <div class="lotus-card-head" style="margin-top: 12px">
@@ -177,7 +184,7 @@
                 {{ themeDetail.model_only_count }} · {{ themeDetail.trend_state }}
               </div>
             </div>
-            <el-button size="small" @click="exportThemeCsv">导出 CSV</el-button>
+              <el-button size="small" @click="exportThemeCsv">导出明细 CSV</el-button>
           </div>
           <div class="summary-subtitle">L3 构成</div>
           <el-table :data="themeDetail.l3_breakdown || []" size="small" max-height="220">
@@ -323,7 +330,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import {
@@ -377,7 +384,10 @@ const weeklyData = ref(null)
 const weeklyGenerating = ref(false)
 const issueStatus = ref([])
 const themeLoading = ref(false)
+const themeLoaded = ref(false)
 const themeList = ref([])
+const themeMeta = ref(null)
+const themeEmptyHint = ref('')
 const themeDetail = ref(null)
 const themeOpinions = ref([])
 const themeOpinionTotal = ref(0)
@@ -392,21 +402,52 @@ const themeQueryParams = () => ({
   limit: 3000
 })
 
+const themeEmptyDescription = computed(() => {
+  if (!themeLoaded.value) {
+    return '点「按日期查主题」：按上方日期汇总客诉主题'
+  }
+  return themeEmptyHint.value || '该日期范围内没有可展示的主题'
+})
+
+const themeStatusText = computed(() => {
+  if (!themeLoaded.value || !themeMeta.value) return ''
+  const m = themeMeta.value
+  const parts = [
+    `日期 ${m.date_from || dateFrom.value} ~ ${m.date_to || dateTo.value}`,
+    `范围内客诉 ${m.current_n ?? 0} 条`,
+    `主题 ${m.theme_n ?? themeList.value.length} 个`
+  ]
+  if (m.skipped_no_l3) parts.push(`缺三级标签 ${m.skipped_no_l3} 条`)
+  return parts.join(' · ')
+})
+
 async function loadThemes () {
   themeLoading.value = true
   try {
     const res = await reportThemesApi(themeQueryParams())
-    if (res.code !== 200) throw new Error(res.msg || 'themes')
+    if (res.code !== 200) throw new Error(res.msg || '查询主题失败')
     themeList.value = res.data?.themes || []
+    themeMeta.value = res.data?.meta || null
+    themeEmptyHint.value = res.data?.empty_hint || res.data?.meta?.empty_hint || ''
+    themeLoaded.value = true
     themeDetail.value = null
     themeOpinions.value = []
+    selectedThemeId.value = ''
+    if (themeList.value.length) {
+      ElMessage.success(`已查出 ${themeList.value.length} 个主题，点击「查看原文」看明细`)
+    } else {
+      ElMessage.warning(themeEmptyHint.value || '该日期范围内没有主题')
+    }
     if (res.data?.gate_ok === false) {
-      ElMessage.warning('主题证据链对账未完全通过，请核对明细')
+      ElMessage.warning('主题条数对账未完全通过，请核对明细')
     }
   } catch (e) {
     console.error(e)
-    ElMessage.error(e.message || '主题加载失败')
+    ElMessage.error(e.message || '查询主题失败')
     themeList.value = []
+    themeMeta.value = null
+    themeEmptyHint.value = e.message || '查询失败'
+    themeLoaded.value = true
   } finally {
     themeLoading.value = false
   }
@@ -1208,6 +1249,15 @@ onUnmounted(() => {
 }
 .theme-evidence-card {
   border-color: rgba(16, 185, 129, 0.35);
+}
+.theme-status-line {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #a7f3d0;
+  font-size: 13px;
+  line-height: 1.45;
 }
 .theme-detail {
   margin-top: 8px;

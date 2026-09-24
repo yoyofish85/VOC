@@ -71,6 +71,21 @@ def _fetch_rows(db_path: str, limit: int = 3000) -> List[Dict[str, Any]]:
     return rows
 
 
+def _empty_hint(
+    *,
+    current_n: int,
+    skipped_no_l3: int,
+    theme_n: int,
+) -> str:
+    if theme_n > 0:
+        return ""
+    if current_n <= 0:
+        return "当前日期范围内没有客诉，请放宽上方「开始/结束」日期后再点查询"
+    if skipped_no_l3 >= current_n:
+        return f"范围内有 {current_n} 条客诉，但都没有三级标签，无法归入主题（需先完成分类/复核）"
+    return f"范围内有 {current_n} 条客诉，但未能归入主题（缺标签或未命中主题映射）"
+
+
 def _in_range(day: Optional[datetime], date_from: str, date_to: str) -> bool:
     if day is None:
         # 无日期：保留在当前窗，避免证据链为空
@@ -123,13 +138,20 @@ def build_theme_report(
     limit: int = 3000,
 ) -> Dict[str, Any]:
     mapping = load_theme_mapping()
-    raw = _fetch_rows(db_path, limit=limit)
+    # 先取最新 limit 条再按日期筛；若窗内为空，放大取样避免「最新 N 条全在窗外」导致空白
+    fetch_n = max(100, min(int(limit or 3000), 8000))
+    raw = _fetch_rows(db_path, limit=fetch_n)
     current_raw = _filter_by_dates(raw, date_from, date_to)
+    if not current_raw and fetch_n < 8000:
+        raw = _fetch_rows(db_path, limit=8000)
+        current_raw = _filter_by_dates(raw, date_from, date_to)
+        fetch_n = 8000
     pdf, pdt = _prev_window(date_from, date_to)
     prev_raw = _filter_by_dates(raw, pdf, pdt)
 
     cur_enr = [_enrich_row(dict(r), mapping) for r in current_raw]
     prev_enr = [_enrich_row(dict(r), mapping) for r in prev_raw]
+    skipped_no_l3 = sum(1 for r in cur_enr if not r.get("l1") or not r.get("l3"))
     chain = build_evidence_chain(cur_enr, quotes_per_theme=5)
     prev_chain = build_evidence_chain(prev_enr, quotes_per_theme=1)
     prev_counts = {t["theme_id"]: t["count"] for t in prev_chain}
@@ -153,6 +175,11 @@ def build_theme_report(
         )
 
     recon = reconcile_evidence(chain)
+    empty_hint = _empty_hint(
+        current_n=len(current_raw),
+        skipped_no_l3=skipped_no_l3,
+        theme_n=len(themes),
+    )
     return {
         "meta": {
             "theme_mapping_version": mapping_version(mapping),
@@ -163,9 +190,12 @@ def build_theme_report(
             "fetched_n": len(raw),
             "current_n": len(current_raw),
             "previous_n": len(prev_raw),
+            "skipped_no_l3": skipped_no_l3,
+            "theme_n": len(themes),
+            "empty_hint": empty_hint,
             "query": {
                 "db": str(db_path),
-                "limit": limit,
+                "limit": fetch_n,
                 "read_only": True,
             },
         },
@@ -173,6 +203,7 @@ def build_theme_report(
         "evidence_chain": chain,
         "reconcile": recon,
         "gate_ok": bool(recon.get("gate_ok")),
+        "empty_hint": empty_hint,
         "_enriched": cur_enr,  # 内部用，API 层剥离
     }
 
