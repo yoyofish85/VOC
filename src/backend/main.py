@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from functools import wraps
 from fastapi import FastAPI, File, UploadFile, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 import logging
@@ -51,6 +51,9 @@ ensure_runtime_dirs()
 _LABEL_PROJECT_STR = str(_LABEL_PROJECT_PATH)
 if _LABEL_PROJECT_STR not in sys.path:
     sys.path.insert(0, _LABEL_PROJECT_STR)
+# 项目根：供 label_project.* 包导入（S7/S9）
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 from taxonomy_normalize import (  # noqa: E402
     CANONICAL_L1_LABELS,
     L2_EVAL_L1,
@@ -73,6 +76,13 @@ from analytics_engine import (  # noqa: E402
     list_weekly_reports,
     load_weekly_report,
     save_weekly_report,
+)
+from theme_report_service import (  # noqa: E402
+    build_theme_report,
+    public_report,
+    theme_detail,
+    theme_export_csv,
+    theme_opinions,
 )
 
 ROOT_DIR = PROJECT_ROOT  # 兼容旧称：项目根目录
@@ -3804,6 +3814,126 @@ async def report_issue_status_api(upload_batch: str = ""):
     except Exception as e:
         logger.exception("report_issue_status: %s", e)
         return {"code": 500, "msg": str(e), "data": []}
+
+
+def _theme_report_sync(date_from: str, date_to: str, limit: int) -> Dict[str, Any]:
+    return build_theme_report(
+        DB_PATH, date_from=date_from, date_to=date_to, limit=limit
+    )
+
+
+@app.get("/api/report/themes")
+async def report_themes_api(
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 3000,
+):
+    """S9：汇报主题列表（含环比、已复核/仅模型分层）。"""
+    try:
+        today = datetime.now().date()
+        df = (date_from or (today - timedelta(days=29)).isoformat())[:10]
+        dt = (date_to or today.isoformat())[:10]
+        lim = max(100, min(int(limit or 3000), 8000))
+        report = await asyncio.to_thread(_theme_report_sync, df, dt, lim)
+        data = public_report(report)
+        return {"code": 200, "msg": "ok", "data": data}
+    except Exception as e:
+        logger.exception("report_themes: %s", e)
+        return {"code": 500, "msg": str(e), "data": {}}
+
+
+@app.get("/api/report/themes/{theme_id}")
+async def report_theme_detail_api(
+    theme_id: str,
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 3000,
+):
+    """S9：主题 → L3 构成 + 代表原文。"""
+    try:
+        today = datetime.now().date()
+        df = (date_from or (today - timedelta(days=29)).isoformat())[:10]
+        dt = (date_to or today.isoformat())[:10]
+        lim = max(100, min(int(limit or 3000), 8000))
+        report = await asyncio.to_thread(_theme_report_sync, df, dt, lim)
+        detail = theme_detail(report, theme_id)
+        if not detail:
+            return {"code": 404, "msg": f"主题不存在: {theme_id}", "data": {}}
+        return {"code": 200, "msg": "ok", "data": detail}
+    except Exception as e:
+        logger.exception("report_theme_detail: %s", e)
+        return {"code": 500, "msg": str(e), "data": {}}
+
+
+@app.get("/api/report/themes/{theme_id}/opinions")
+async def report_theme_opinions_api(
+    theme_id: str,
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 3000,
+    page: int = 1,
+    page_size: int = 20,
+    reviewed: str = "",
+):
+    """S9：主题下原始记录分页（VIN/phone 脱敏）。"""
+    try:
+        today = datetime.now().date()
+        df = (date_from or (today - timedelta(days=29)).isoformat())[:10]
+        dt = (date_to or today.isoformat())[:10]
+        lim = max(100, min(int(limit or 3000), 8000))
+        report = await asyncio.to_thread(_theme_report_sync, df, dt, lim)
+        reviewed_only = None
+        if str(reviewed).strip() in ("1", "true", "yes"):
+            reviewed_only = True
+        elif str(reviewed).strip() in ("0", "false", "no"):
+            reviewed_only = False
+        data = theme_opinions(
+            report,
+            theme_id,
+            page=page,
+            page_size=page_size,
+            reviewed_only=reviewed_only,
+        )
+        if data.get("total", 0) == 0 and not theme_detail(report, theme_id):
+            return {"code": 404, "msg": f"主题不存在: {theme_id}", "data": data}
+        return {"code": 200, "msg": "ok", "data": data}
+    except Exception as e:
+        logger.exception("report_theme_opinions: %s", e)
+        return {"code": 500, "msg": str(e), "data": {}}
+
+
+@app.get("/api/report/themes/{theme_id}/export.csv")
+async def report_theme_export_csv_api(
+    theme_id: str,
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 3000,
+):
+    """S9：主题证据 CSV（脱敏）；行数应等于主题 count。"""
+    try:
+        today = datetime.now().date()
+        df = (date_from or (today - timedelta(days=29)).isoformat())[:10]
+        dt = (date_to or today.isoformat())[:10]
+        lim = max(100, min(int(limit or 3000), 8000))
+        report = await asyncio.to_thread(_theme_report_sync, df, dt, lim)
+        if not theme_detail(report, theme_id):
+            return JSONResponse(
+                status_code=404,
+                content={"code": 404, "msg": f"主题不存在: {theme_id}"},
+            )
+        filename, body = theme_export_csv(report, theme_id)
+        return Response(
+            content=body.encode("utf-8-sig"),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except Exception as e:
+        logger.exception("report_theme_export: %s", e)
+        return JSONResponse(
+            status_code=500, content={"code": 500, "msg": str(e)}
+        )
 
 
 @app.get("/api/report/weekly_reports")

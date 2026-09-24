@@ -196,6 +196,23 @@ export const dashboardTrendApi = (days = 7) =>
 export const reportIssueStatusApi = (uploadBatch = '') =>
   request.get('/api/report/issue_status', { params: { upload_batch: uploadBatch }, timeout: 15000 });
 
+export const reportThemesApi = (params) =>
+  request.get('/api/report/themes', { params, timeout: 120000 });
+
+export const reportThemeDetailApi = (themeId, params) =>
+  request.get(`/api/report/themes/${encodeURIComponent(themeId)}`, { params, timeout: 120000 });
+
+export const reportThemeOpinionsApi = (themeId, params) =>
+  request.get(`/api/report/themes/${encodeURIComponent(themeId)}/opinions`, {
+    params,
+    timeout: 120000
+  });
+
+export const reportThemeExportCsvUrl = (themeId, params = {}) => {
+  const q = new URLSearchParams(params).toString()
+  return `${API_BASE_URL}/api/report/themes/${encodeURIComponent(themeId)}/export.csv${q ? `?${q}` : ''}`
+};
+
 export const reportWeeklyReportsApi = () => request.get('/api/report/weekly_reports', { timeout: 15000 });
 
 export const reportWeeklyReportApi = (week) =>

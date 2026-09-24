@@ -134,6 +134,94 @@
         <el-empty v-else description="暂无周报，点击生成本周周报" :image-size="64" />
       </div>
 
+      <div class="lotus-card lotus-card-wide theme-evidence-card">
+        <div class="lotus-card-head">
+          <div>
+            <div class="lotus-card-title">主题证据链 · Theme → L3 → 原文</div>
+            <div class="lotus-card-title-en">汇报主题下钻 · 已复核/仅模型分层 · CSV 脱敏导出</div>
+          </div>
+          <el-button size="small" type="primary" :loading="themeLoading" @click="loadThemes">
+            加载主题
+          </el-button>
+        </div>
+        <el-table
+          v-if="themeList.length"
+          :data="themeList"
+          size="small"
+          stripe
+          highlight-current-row
+          max-height="320"
+          @row-click="onThemeRowClick"
+        >
+          <el-table-column prop="theme_id" label="ID" width="90" />
+          <el-table-column prop="theme_name" label="主题" min-width="160" />
+          <el-table-column prop="count" label="条数" width="70" />
+          <el-table-column prop="reviewed_count" label="已复核" width="80" />
+          <el-table-column prop="model_only_count" label="仅模型" width="80" />
+          <el-table-column prop="prev_count" label="上期" width="70" />
+          <el-table-column prop="trend_state" label="趋势" width="80" />
+          <el-table-column label="操作" width="100" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click.stop="openTheme(row)">下钻</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else description="点击「加载主题」按当前日期范围聚合" :image-size="56" />
+
+        <div v-if="themeDetail" class="theme-detail">
+          <div class="lotus-card-head" style="margin-top: 12px">
+            <div>
+              <div class="lotus-card-title">{{ themeDetail.theme_id }} · {{ themeDetail.theme_name }}</div>
+              <div class="lotus-card-title-en">
+                共 {{ themeDetail.count }} 条 · 已复核 {{ themeDetail.reviewed_count }} · 仅模型
+                {{ themeDetail.model_only_count }} · {{ themeDetail.trend_state }}
+              </div>
+            </div>
+            <el-button size="small" @click="exportThemeCsv">导出 CSV</el-button>
+          </div>
+          <div class="summary-subtitle">L3 构成</div>
+          <el-table :data="themeDetail.l3_breakdown || []" size="small" max-height="220">
+            <el-table-column prop="path" label="路径" min-width="220" />
+            <el-table-column prop="l3" label="L3" min-width="120" />
+            <el-table-column prop="count" label="条数" width="70" />
+            <el-table-column prop="reviewed_count" label="已复核" width="80" />
+            <el-table-column prop="model_only_count" label="仅模型" width="80" />
+          </el-table>
+          <div class="summary-subtitle" style="margin-top: 10px">代表原文</div>
+          <div v-for="q in themeDetail.quotes || []" :key="q.opinion_id + q.text" class="quote-item">
+            <div class="quote-issue">{{ q.l3 || '—' }} · {{ q.reviewed ? '已复核' : '仅模型' }}</div>
+            <div class="quote-text">「{{ q.text }}」</div>
+          </div>
+          <div class="summary-subtitle" style="margin-top: 10px">明细（脱敏）</div>
+          <el-radio-group v-model="themeReviewedFilter" size="small" @change="loadThemeOpinions">
+            <el-radio-button label="">全部</el-radio-button>
+            <el-radio-button label="1">已复核</el-radio-button>
+            <el-radio-button label="0">仅模型</el-radio-button>
+          </el-radio-group>
+          <el-table :data="themeOpinions" size="small" max-height="280" style="margin-top: 8px">
+            <el-table-column prop="opinion_id" label="ID" width="90" />
+            <el-table-column prop="l2" label="L2" width="110" />
+            <el-table-column prop="l3" label="L3" width="120" />
+            <el-table-column prop="reviewed" label="复核" width="70">
+              <template #default="{ row }">{{ row.reviewed ? '是' : '否' }}</template>
+            </el-table-column>
+            <el-table-column prop="vin" label="VIN" width="100" />
+            <el-table-column prop="phone" label="手机" width="100" />
+            <el-table-column prop="text" label="原文" min-width="220" show-overflow-tooltip />
+          </el-table>
+          <div class="theme-pager">
+            <el-pagination
+              v-model:current-page="themePage"
+              :page-size="themePageSize"
+              :total="themeOpinionTotal"
+              layout="prev, pager, next, total"
+              small
+              @current-change="loadThemeOpinions"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="lotus-card">
         <div class="lotus-card-head">
           <div>
@@ -248,7 +336,11 @@ import {
   reportWeeklyReportsApi,
   reportWeeklyReportApi,
   reportGenerateWeeklyApi,
-  reportIssueStatusApi
+  reportIssueStatusApi,
+  reportThemesApi,
+  reportThemeDetailApi,
+  reportThemeOpinionsApi,
+  reportThemeExportCsvUrl
 } from '@/api/review'
 
 const chartRef1 = ref(null)
@@ -284,6 +376,85 @@ const selectedWeek = ref('')
 const weeklyData = ref(null)
 const weeklyGenerating = ref(false)
 const issueStatus = ref([])
+const themeLoading = ref(false)
+const themeList = ref([])
+const themeDetail = ref(null)
+const themeOpinions = ref([])
+const themeOpinionTotal = ref(0)
+const themePage = ref(1)
+const themePageSize = ref(20)
+const themeReviewedFilter = ref('')
+const selectedThemeId = ref('')
+
+const themeQueryParams = () => ({
+  date_from: dateFrom.value,
+  date_to: dateTo.value,
+  limit: 3000
+})
+
+async function loadThemes () {
+  themeLoading.value = true
+  try {
+    const res = await reportThemesApi(themeQueryParams())
+    if (res.code !== 200) throw new Error(res.msg || 'themes')
+    themeList.value = res.data?.themes || []
+    themeDetail.value = null
+    themeOpinions.value = []
+    if (res.data?.gate_ok === false) {
+      ElMessage.warning('主题证据链对账未完全通过，请核对明细')
+    }
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e.message || '主题加载失败')
+    themeList.value = []
+  } finally {
+    themeLoading.value = false
+  }
+}
+
+async function openTheme (row) {
+  selectedThemeId.value = row.theme_id
+  themePage.value = 1
+  try {
+    const res = await reportThemeDetailApi(row.theme_id, themeQueryParams())
+    if (res.code !== 200) throw new Error(res.msg || 'theme detail')
+    themeDetail.value = res.data || null
+    await loadThemeOpinions()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e.message || '主题下钻失败')
+  }
+}
+
+function onThemeRowClick (row) {
+  openTheme(row)
+}
+
+async function loadThemeOpinions () {
+  if (!selectedThemeId.value) return
+  try {
+    const params = {
+      ...themeQueryParams(),
+      page: themePage.value,
+      page_size: themePageSize.value
+    }
+    if (themeReviewedFilter.value !== '') params.reviewed = themeReviewedFilter.value
+    const res = await reportThemeOpinionsApi(selectedThemeId.value, params)
+    if (res.code !== 200) throw new Error(res.msg || 'opinions')
+    themeOpinions.value = res.data?.items || []
+    themeOpinionTotal.value = res.data?.total || 0
+  } catch (e) {
+    console.error(e)
+    themeOpinions.value = []
+    themeOpinionTotal.value = 0
+  }
+}
+
+function exportThemeCsv () {
+  if (!selectedThemeId.value) return
+  const url = reportThemeExportCsvUrl(selectedThemeId.value, themeQueryParams())
+  window.open(url, '_blank')
+}
 
 let loadTimer = null
 const scheduleLoad = () => {
@@ -1034,6 +1205,17 @@ onUnmounted(() => {
 }
 .weekly-section li {
   margin-bottom: 4px;
+}
+.theme-evidence-card {
+  border-color: rgba(16, 185, 129, 0.35);
+}
+.theme-detail {
+  margin-top: 8px;
+}
+.theme-pager {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
 }
 .summary-quotes {
   margin-top: 12px;
