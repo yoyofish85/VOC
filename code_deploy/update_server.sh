@@ -160,6 +160,17 @@ if not any(n.endswith("src/backend/main.py") for n in names):
 if not any("src/frontend/dist/" in n for n in names):
     print("[错误] zip 内缺少 src/frontend/dist/")
     sys.exit(1)
+# S8 起建议带齐（旧包无则仅警告）
+optional = [
+    "label_project/complaint_clusters.py",
+    "performance_evaluation/run_complaint_clusters.py",
+    "VERSION_MANIFEST.txt",
+]
+missing = [p for p in optional if not any(n.endswith(p) or n == p for n in names)]
+if missing:
+    print("  [提示] 包内缺少（S8 跨 L2 测试需要）:", ", ".join(missing))
+else:
+    print("  [✓] 含 label_project / S8 脚本 / VERSION_MANIFEST")
 print("  [✓] zip 依赖检查通过")
 PY
 }
@@ -301,8 +312,33 @@ echo ""
 
 echo "[6/7] 正在合并覆盖 src/（不删除 data/、不覆盖项目根下配置）..."
 rsync -a "$TMP/src/" "$VOC_ROOT/src/"
+# S5–S8：若包内带 label_project / performance_evaluation 则同步（不删服务器独有文件）
+if [[ -d "$TMP/label_project" ]]; then
+  echo "  → 同步 label_project/ ..."
+  mkdir -p "$VOC_ROOT/label_project"
+  if [[ -d "$VOC_ROOT/label_project" ]]; then
+    mkdir -p "$BACKUP_DIR"
+    if [[ ! -d "$BACKUP_DIR/label_project_backup_$STAMP" ]]; then
+      cp -R "$VOC_ROOT/label_project" "$BACKUP_DIR/label_project_backup_$STAMP" 2>/dev/null || true
+    fi
+  fi
+  rsync -a "$TMP/label_project/" "$VOC_ROOT/label_project/"
+  echo "  [✓] label_project/ 已更新"
+fi
+if [[ -d "$TMP/performance_evaluation" ]]; then
+  echo "  → 同步 performance_evaluation/（不含覆盖 exports）..."
+  mkdir -p "$VOC_ROOT/performance_evaluation"
+  rsync -a --exclude 'exports/' --exclude 'state/' \
+    "$TMP/performance_evaluation/" "$VOC_ROOT/performance_evaluation/"
+  echo "  [✓] performance_evaluation/ 已更新"
+fi
+if [[ -f "$TMP/VERSION_MANIFEST.txt" ]]; then
+  cp -f "$TMP/VERSION_MANIFEST.txt" "$VOC_ROOT/VERSION_MANIFEST.txt"
+  cp -f "$TMP/VERSION_MANIFEST.txt" "$SCRIPT_DIR/VERSION_MANIFEST.txt"
+  echo "  [✓] VERSION_MANIFEST.txt 已写入项目根"
+fi
 rm -rf "$TMP"
-echo "  [✓] src/ 已更新"
+echo "  [✓] 代码目录已更新"
 echo ""
 
 echo "[7/7] 前端依赖检查（若无 node_modules 则安装）..."
@@ -315,7 +351,7 @@ echo "  [✓] 前端依赖就绪"
 echo ""
 
 echo "============================================================"
-echo " 更新成功 — 历史数据未修改（未触碰 data/、*.db、label_project/）"
+echo " 更新成功 — 历史数据未修改（未触碰 data/、*.db）"
 echo "============================================================"
 echo "备份位置: $BACKUP_PATH"
 print_deploy_summary "$BACKUP_PATH"

@@ -134,7 +134,50 @@ rsync -a \
 mkdir -p "$STAGE/src/frontend/dist"
 rsync -a "$ROOT/src/frontend/dist/" "$STAGE/src/frontend/dist/"
 
+# S5–S8 依赖：label_project + 评估脚本（不含 exports / 数据库）
+echo "  → 附带 label_project/ 与 performance_evaluation/（工具脚本）..."
+mkdir -p "$STAGE/label_project" "$STAGE/performance_evaluation"
+rsync -a \
+  --exclude '__pycache__/' \
+  --exclude '*.py[cod]' \
+  --exclude '.pytest_cache/' \
+  --exclude '.DS_Store' \
+  --exclude '*.db' \
+  --exclude '*.db-*' \
+  "$ROOT/label_project/" "$STAGE/label_project/"
+rsync -a \
+  --exclude '__pycache__/' \
+  --exclude '*.py[cod]' \
+  --exclude '.pytest_cache/' \
+  --exclude '.DS_Store' \
+  --exclude 'exports/' \
+  --exclude 'state/' \
+  --exclude '*.db' \
+  --exclude '*.csv' \
+  --exclude '*.jsonl' \
+  "$ROOT/performance_evaluation/" "$STAGE/performance_evaluation/"
+
 PACKED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+FULL_SHA=""
+BRANCH=""
+if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  FULL_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+  BRANCH="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+fi
+# 离线协议 VERSION_MANIFEST（与 update.zip 同传）
+{
+  echo "package=VOC_offline_update"
+  echo "branch=${BRANCH}"
+  echo "git_commit_short=${GIT_COMMIT}"
+  echo "git_commit=${FULL_SHA}"
+  echo "deploy_tag=${DEPLOY_TAG}"
+  echo "packed_at=${PACKED_AT}"
+  echo "includes=src,label_project,performance_evaluation"
+  echo "excludes=data,*.db,exports,node_modules,venv"
+  echo "note=Server has no Git; deploy only this paired zip+md5."
+} >"$STAGE/VERSION_MANIFEST.txt"
+cp -f "$STAGE/VERSION_MANIFEST.txt" "$SCRIPT_DIR/VERSION_MANIFEST.txt"
+
 python3 - "$STAGE/src/deploy_manifest.json" "$DEPLOY_TAG" "$GIT_COMMIT" "$PACKED_AT" "$ROOT" <<'PY'
 import json, subprocess, sys
 from pathlib import Path
@@ -172,10 +215,18 @@ echo "[3/5] 正在生成 zip..."
 rm -f "$OUT_ZIP" "$OUT_MD5"
 (
   cd "$STAGE"
-  zip -r -q "$OUT_ZIP" src
+  zip -r -q "$OUT_ZIP" src label_project performance_evaluation VERSION_MANIFEST.txt
 )
 BYTES=$(stat -f%z "$OUT_ZIP" 2>/dev/null || stat -c%s "$OUT_ZIP" 2>/dev/null || echo "?")
 echo "  [✓] 已生成 update.zip（约 $BYTES 字节）"
+# 按顺序执行计划命名归档副本（便于线下传递留档）
+if [[ -n "${GIT_COMMIT}" ]]; then
+  PACK_LABEL="${PACK_LABEL:-update}"
+  ARCHIVE_NAME="VOC_${PACK_LABEL}_${GIT_COMMIT}_$(date +%Y%m%d_%H%M%S).zip"
+  cp -f "$OUT_ZIP" "$SCRIPT_DIR/$ARCHIVE_NAME"
+  write_md5_file "$SCRIPT_DIR/$ARCHIVE_NAME" "$SCRIPT_DIR/${ARCHIVE_NAME}.md5"
+  echo "  [✓] 归档副本: $SCRIPT_DIR/$ARCHIVE_NAME"
+fi
 echo ""
 
 echo "[4/5] 生成 MD5 校验文件..."
@@ -212,6 +263,6 @@ echo "⚠️  请将 update.zip 与 update.zip.md5 成对拷贝到服务器（�
 echo "请将 update.zip 与 update.zip.md5 离线拷贝到服务器，然后执行："
 echo "  ./code_deploy/update_server.sh"
 echo ""
-echo "安全说明：本包仅含 src/ 源码与前端 dist，不含 data/、*.db、label_project/。"
-echo "若 label_project/ 或根目录 app_launcher.py、requirements.txt 有变更，请另行同步。"
+echo "安全说明：本包含 src/ + label_project/ + performance_evaluation/（无 data/、*.db、exports/）。"
+echo "另附 VERSION_MANIFEST.txt（zip 内 + code_deploy/ 各一份）。"
 echo "============================================================"
