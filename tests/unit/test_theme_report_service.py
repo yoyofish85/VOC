@@ -142,6 +142,57 @@ def test_theme_report_reconcile_and_export(tmp_path: Path):
     assert report["meta"]["current_n"] >= 1
 
 
+def test_theme_report_reads_l3_from_meta_when_columns_empty(tmp_path: Path):
+    db = tmp_path / "meta_only.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        """
+        CREATE TABLE opinion (
+          opinion_id TEXT PRIMARY KEY,
+          original_text TEXT,
+          v3_l1 TEXT, v3_l2 TEXT, v3_l3 TEXT, v3_label_meta TEXT,
+          review_status INTEGER, review_l1 TEXT, review_l2 TEXT, review_l3 TEXT,
+          reviewed_at TEXT, create_time TEXT,
+          vin TEXT, phone TEXT, car_model TEXT, country TEXT,
+          reflow_synced INTEGER, upload_batch TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO opinion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            "m1",
+            "车辆无法充电",
+            "",
+            "",
+            "",
+            '{"l1":"产品质量类","l2":"车端充电问题","l3":"无法充电","confidence":0.9}',
+            0,
+            "",
+            "",
+            "",
+            "",
+            "2026-09-20 10:00:00",
+            "",
+            "",
+            "Eletre",
+            "中国",
+            0,
+            "b1",
+        ),
+    )
+    conn.commit()
+    conn.close()
+    report = build_theme_report(
+        str(db), date_from="2026-09-01", date_to="2026-09-30", limit=100
+    )
+    assert report["meta"]["theme_n"] >= 1
+    assert report["meta"]["skipped_no_l3"] == 0
+    assert report["meta"]["meta_l3_n"] == 1
+
+
 def test_theme_report_empty_hint_when_no_rows(tmp_path: Path):
     db = tmp_path / "empty.db"
     conn = sqlite3.connect(str(db))

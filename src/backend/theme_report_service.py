@@ -19,6 +19,7 @@ for p in (str(ROOT), str(LABEL)):
 
 from label_project.cross_record_insights import (  # noqa: E402
     _enrich_row,
+    _meta_dict,
     _parse_day,
     build_evidence_chain,
     reconcile_evidence,
@@ -76,13 +77,23 @@ def _empty_hint(
     current_n: int,
     skipped_no_l3: int,
     theme_n: int,
+    meta_l3_n: int = 0,
+    col_l3_n: int = 0,
 ) -> str:
     if theme_n > 0:
         return ""
     if current_n <= 0:
         return "当前日期范围内没有客诉，请放宽上方「开始/结束」日期后再点查询"
     if skipped_no_l3 >= current_n:
-        return f"范围内有 {current_n} 条客诉，但都没有三级标签，无法归入主题（需先完成分类/复核）"
+        if meta_l3_n == 0 and col_l3_n == 0:
+            return (
+                f"范围内有 {current_n} 条客诉，但都没有三级标签，无法归入主题"
+                "（请先在「批量分类」里跑一遍带三级标签的分类，或完成人工复核）"
+            )
+        return (
+            f"范围内有 {current_n} 条客诉，有效三级标签不足，无法归入主题"
+            f"（列上有 L3：{col_l3_n}，meta 里有 L3：{meta_l3_n}）"
+        )
     return f"范围内有 {current_n} 条客诉，但未能归入主题（缺标签或未命中主题映射）"
 
 
@@ -152,6 +163,16 @@ def build_theme_report(
     cur_enr = [_enrich_row(dict(r), mapping) for r in current_raw]
     prev_enr = [_enrich_row(dict(r), mapping) for r in prev_raw]
     skipped_no_l3 = sum(1 for r in cur_enr if not r.get("l1") or not r.get("l3"))
+    col_l3_n = sum(
+        1
+        for r in current_raw
+        if str(r.get("v3_l3") or r.get("review_l3") or "").strip()
+    )
+    meta_l3_n = 0
+    for r in current_raw:
+        md = _meta_dict(r.get("v3_label_meta"))
+        if str(md.get("l3") or md.get("level3") or "").strip():
+            meta_l3_n += 1
     chain = build_evidence_chain(cur_enr, quotes_per_theme=5)
     prev_chain = build_evidence_chain(prev_enr, quotes_per_theme=1)
     prev_counts = {t["theme_id"]: t["count"] for t in prev_chain}
@@ -179,6 +200,8 @@ def build_theme_report(
         current_n=len(current_raw),
         skipped_no_l3=skipped_no_l3,
         theme_n=len(themes),
+        meta_l3_n=meta_l3_n,
+        col_l3_n=col_l3_n,
     )
     return {
         "meta": {
@@ -191,6 +214,8 @@ def build_theme_report(
             "current_n": len(current_raw),
             "previous_n": len(prev_raw),
             "skipped_no_l3": skipped_no_l3,
+            "col_l3_n": col_l3_n,
+            "meta_l3_n": meta_l3_n,
             "theme_n": len(themes),
             "empty_hint": empty_hint,
             "query": {

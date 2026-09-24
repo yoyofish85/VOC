@@ -85,6 +85,12 @@ def _labels(row: Dict[str, Any]) -> Tuple[str, str, str]:
         l1 = (row.get("v3_l1") or "").strip()
         l2 = (row.get("v3_l2") or "").strip()
         l3 = (row.get("v3_l3") or "").strip()
+    # 物化列为空时，回退 v3_label_meta（服务器常见未回填）
+    if not l1 or not l2 or not l3:
+        meta = _meta_dict(row.get("v3_label_meta"))
+        l1 = l1 or str(meta.get("l1") or "").strip()
+        l2 = l2 or str(meta.get("l2") or "").strip()
+        l3 = l3 or str(meta.get("l3") or meta.get("level3") or "").strip()
     return l1, l2, l3
 
 
