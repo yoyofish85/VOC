@@ -1,0 +1,22 @@
+{
+  "source": "MacBook server dry-run 2026-09-24",
+  "sample_size": 400,
+  "before_generic_rate": 1.0,
+  "after_generic_rate": 0.0,
+  "after_pending_rate": 0.64,
+  "after_concrete_l3_rate": 0.36,
+  "l1_changed": 0,
+  "l2_changed": 0,
+  "match_type_counts": {
+    "l3_pending": 256,
+    "standard_l3": 144
+  },
+  "focus_l2_coverage": {
+    "销售服务问题": 128,
+    "售后服务问题": 188,
+    "座舱问题": 49,
+    "APP问题": 35
+  },
+  "gate_ok": true,
+  "note": "Default flag remains OFF in production until explicit enable."
+}
