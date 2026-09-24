@@ -193,6 +193,86 @@ def test_theme_report_reads_l3_from_meta_when_columns_empty(tmp_path: Path):
     assert report["meta"]["meta_l3_n"] == 1
 
 
+def test_theme_report_prefers_labeled_over_newer_unlabeled(tmp_path: Path):
+    """最新大批无 L3 导入不应淹没历史已分类数据。"""
+    db = tmp_path / "crowd.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        """
+        CREATE TABLE opinion (
+          opinion_id TEXT PRIMARY KEY,
+          original_text TEXT,
+          v3_l1 TEXT, v3_l2 TEXT, v3_l3 TEXT, v3_label_meta TEXT,
+          review_status INTEGER, review_l1 TEXT, review_l2 TEXT, review_l3 TEXT,
+          reviewed_at TEXT, create_time TEXT,
+          vin TEXT, phone TEXT, car_model TEXT, country TEXT,
+          reflow_synced INTEGER, upload_batch TEXT
+        )
+        """
+    )
+    # 先插入有 L3 的历史
+    conn.execute(
+        """
+        INSERT INTO opinion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            "old1",
+            "车辆无法充电",
+            "产品质量类",
+            "车端充电问题",
+            "无法充电",
+            "",
+            0,
+            "",
+            "",
+            "",
+            "",
+            "2026-09-10 10:00:00",
+            "",
+            "",
+            "Eletre",
+            "中国",
+            0,
+            "b0",
+        ),
+    )
+    # 再插入大量无 L3、无日期（会通过日期窗）的「最新」行
+    for i in range(80):
+        conn.execute(
+            """
+            INSERT INTO opinion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                f"new{i}",
+                f"无标签客诉{i}",
+                "",
+                "",
+                "",
+                "",
+                0,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                0,
+                "b_new",
+            ),
+        )
+    conn.commit()
+    conn.close()
+    report = build_theme_report(
+        str(db), date_from="2026-09-01", date_to="2026-09-30", limit=50
+    )
+    assert report["meta"]["theme_n"] >= 1
+    assert report["meta"]["col_l3_n"] >= 1
+    assert report["meta"]["skipped_no_l3"] < report["meta"]["current_n"]
+
+
 def test_theme_report_empty_hint_when_no_rows(tmp_path: Path):
     db = tmp_path / "empty.db"
     conn = sqlite3.connect(str(db))

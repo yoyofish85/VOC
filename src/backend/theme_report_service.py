@@ -52,9 +52,11 @@ def mask_phone(raw: Any) -> str:
 
 
 def _fetch_rows(db_path: str, limit: int = 3000) -> List[Dict[str, Any]]:
+    """取样本：优先带三级标签的行，避免「最新无 L3 导入」挤掉历史已分类数据。"""
     uri = f"file:{Path(db_path).resolve()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
+    lim = max(100, min(int(limit or 3000), 8000))
     rows = [
         dict(r)
         for r in conn.execute(
@@ -62,10 +64,20 @@ def _fetch_rows(db_path: str, limit: int = 3000) -> List[Dict[str, Any]]:
             SELECT {_SQL_COLS}
             FROM opinion
             WHERE TRIM(IFNULL(original_text,'')) != ''
-            ORDER BY rowid DESC
+            ORDER BY
+              CASE
+                WHEN TRIM(IFNULL(v3_l3,'')) != ''
+                  OR TRIM(IFNULL(review_l3,'')) != '' THEN 0
+                WHEN TRIM(IFNULL(v3_label_meta,'')) != ''
+                  AND instr(v3_label_meta, '"l3":') > 0
+                  AND instr(v3_label_meta, '"l3": ""') = 0
+                  AND instr(v3_label_meta, '"l3":""') = 0 THEN 1
+                ELSE 2
+              END,
+              rowid DESC
             LIMIT ?
             """,
-            [int(limit)],
+            [lim],
         ).fetchall()
     ]
     conn.close()
