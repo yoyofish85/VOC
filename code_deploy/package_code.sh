@@ -136,7 +136,7 @@ rsync -a "$ROOT/src/frontend/dist/" "$STAGE/src/frontend/dist/"
 
 # S5–S8 依赖：label_project + 评估脚本（不含 exports / 数据库）
 echo "  → 附带 label_project/ 与 performance_evaluation/（工具脚本）..."
-mkdir -p "$STAGE/label_project" "$STAGE/performance_evaluation"
+mkdir -p "$STAGE/label_project" "$STAGE/performance_evaluation" "$STAGE/code_deploy"
 rsync -a \
   --exclude '__pycache__/' \
   --exclude '*.py[cod]' \
@@ -156,6 +156,13 @@ rsync -a \
   --exclude '*.csv' \
   --exclude '*.jsonl' \
   "$ROOT/performance_evaluation/" "$STAGE/performance_evaluation/"
+# 部署脚本本身也要进包，否则服务器仍跑「只更新 src/」的旧 update_server.sh
+for f in update_server.sh package_code.sh deploy_checklist.py rollback_server.sh README.md; do
+  if [[ -f "$SCRIPT_DIR/$f" ]]; then
+    cp -f "$SCRIPT_DIR/$f" "$STAGE/code_deploy/$f"
+  fi
+done
+chmod +x "$STAGE/code_deploy/"*.sh 2>/dev/null || true
 
 PACKED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 FULL_SHA=""
@@ -172,7 +179,7 @@ fi
   echo "git_commit=${FULL_SHA}"
   echo "deploy_tag=${DEPLOY_TAG}"
   echo "packed_at=${PACKED_AT}"
-  echo "includes=src,label_project,performance_evaluation"
+  echo "includes=src,label_project,performance_evaluation,code_deploy"
   echo "excludes=data,*.db,exports,node_modules,venv"
   echo "note=Server has no Git; deploy only this paired zip+md5."
 } >"$STAGE/VERSION_MANIFEST.txt"
@@ -215,7 +222,7 @@ echo "[3/5] 正在生成 zip..."
 rm -f "$OUT_ZIP" "$OUT_MD5"
 (
   cd "$STAGE"
-  zip -r -q "$OUT_ZIP" src label_project performance_evaluation VERSION_MANIFEST.txt
+  zip -r -q "$OUT_ZIP" src label_project performance_evaluation code_deploy VERSION_MANIFEST.txt
 )
 BYTES=$(stat -f%z "$OUT_ZIP" 2>/dev/null || stat -c%s "$OUT_ZIP" 2>/dev/null || echo "?")
 echo "  [✓] 已生成 update.zip（约 $BYTES 字节）"
@@ -263,6 +270,9 @@ echo "⚠️  请将 update.zip 与 update.zip.md5 成对拷贝到服务器（�
 echo "请将 update.zip 与 update.zip.md5 离线拷贝到服务器，然后执行："
 echo "  ./code_deploy/update_server.sh"
 echo ""
-echo "安全说明：本包含 src/ + label_project/ + performance_evaluation/（无 data/、*.db、exports/）。"
+echo "安全说明：本包含 src/ + label_project/ + performance_evaluation/ + code_deploy 脚本（无 data/、*.db、exports/）。"
 echo "另附 VERSION_MANIFEST.txt（zip 内 + code_deploy/ 各一份）。"
+echo "若服务器仍是旧 update_server（日志写「未触碰 label_project」），请先："
+echo "  unzip -o code_deploy/update.zip 'code_deploy/update_server.sh' -d ."
+echo "  再执行 ./code_deploy/update_server.sh"
 echo "============================================================"

@@ -307,6 +307,14 @@ if [[ ! -d "$TMP/src" ]]; then
   rm -rf "$TMP"
   exit 1
 fi
+# 若包内带新版部署脚本，先覆盖本地 code_deploy（解决「旧脚本只更 src」）
+if [[ -d "$TMP/code_deploy" ]]; then
+  echo "  → 同步 code_deploy 脚本（含 update_server.sh）..."
+  mkdir -p "$SCRIPT_DIR"
+  rsync -a "$TMP/code_deploy/" "$SCRIPT_DIR/"
+  chmod +x "$SCRIPT_DIR/"*.sh 2>/dev/null || true
+  echo "  [✓] code_deploy 脚本已更新"
+fi
 echo "  [✓] 解压完成"
 echo ""
 
@@ -324,6 +332,8 @@ if [[ -d "$TMP/label_project" ]]; then
   fi
   rsync -a "$TMP/label_project/" "$VOC_ROOT/label_project/"
   echo "  [✓] label_project/ 已更新"
+else
+  echo "  [提示] 包内无 label_project/，跳过（旧包或未 INCLUDE）"
 fi
 if [[ -d "$TMP/performance_evaluation" ]]; then
   echo "  → 同步 performance_evaluation/（不含覆盖 exports）..."
