@@ -235,7 +235,7 @@ echo "  [✓] $OUT_MD5"
 echo ""
 
 echo "[5/5] 校验 zip 内顶层结构..."
-if ! unzip -l "$OUT_ZIP" | head -20 | grep -q 'src/'; then
+if ! unzip -l "$OUT_ZIP" | grep -q 'src/'; then
   echo "[警告] zip 内未检测到 src/ 前缀，请检查。"
 else
   echo "  [✓] 包含 src/ 目录结构"
