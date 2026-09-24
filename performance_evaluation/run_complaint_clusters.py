@@ -75,7 +75,12 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=400)
     ap.add_argument("--prefer-ollama", action="store_true")
     ap.add_argument("--force-hashing", action="store_true")
-    ap.add_argument("--min-sim", type=float, default=0.55)
+    ap.add_argument(
+        "--min-sim",
+        type=float,
+        default=None,
+        help="合并阈值；默认 hashing=0.55 / ollama=0.72（脚本会再自动上调以防一坨）",
+    )
     ap.add_argument("--max-clusters", type=int, default=15)
     ap.add_argument("--keyword-fallback", action="store_true")
     args = ap.parse_args()
@@ -94,6 +99,12 @@ def main() -> int:
         embedder = oe if oe.available() else HashingEmbedder()
     else:
         embedder = get_embedder(prefer_ollama=False)
+
+    # bge 等稠密向量基线相似度高，默认阈值高于 hashing
+    if args.min_sim is None:
+        min_sim = 0.72 if str(getattr(embedder, "name", "")).startswith("ollama:") else 0.55
+    else:
+        min_sim = float(args.min_sim)
 
     vectors = embedder.embed(texts)
     embed_db = args.embed_db or default_embedding_db(args.db)
@@ -121,7 +132,7 @@ def main() -> int:
             rows,
             vectors,
             model_name=embedder.name,
-            min_sim=args.min_sim,
+            min_sim=min_sim,
             max_clusters=args.max_clusters,
         )
         method = f"embedding:{embedder.name}"
@@ -162,6 +173,9 @@ def main() -> int:
                 }
             )
 
+    # 最大簇占比过高 → 业务上不可用，即使统计上 cross_l2>=1
+    largest = max((c["count"] for c in clusters), default=0)
+    mega = bool(rows) and largest >= int(len(rows) * 0.50)
     payload = {
         "meta": {
             "sample_n": len(rows),
@@ -169,16 +183,18 @@ def main() -> int:
             "method": method,
             "embed_db": str(embed_db),
             "stored_vectors": stored,
-            "min_sim": args.min_sim,
+            "min_sim": min_sim,
             "opinion_db": str(args.db),
             "read_only_opinion": True,
+            "largest_cluster": largest,
+            "mega_cluster": mega,
         },
         "stats": {
             "cluster_n": len(clusters),
             "cross_l2_n": len(cross),
             "cross_l2_ge3_n": len(cross3),
         },
-        "gate_ok": len(cross) >= 1 and stored == len(rows),
+        "gate_ok": len(cross) >= 1 and stored == len(rows) and not mega,
         "clusters": clusters,
         "insights": insights,
     }

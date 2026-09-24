@@ -46,27 +46,58 @@ def cluster_by_similarity(
     min_sim: float = 0.55,
     max_clusters: int = 15,
     min_cluster_size: int = 3,
+    max_frac: float = 0.35,
 ) -> List[List[int]]:
-    """阈值凝聚：相似度 ≥ min_sim 合并；过大则提高阈值直到 ≤ max_clusters。"""
+    """质心友好的阈值凝聚。
+
+    避免单链接把全文串成一簇：预计算相似度后从 min_sim 起自动抬高阈值，
+    直到最大簇占比 ≤ max_frac 或阈值触及上限。
+    """
     n = len(vectors)
     if n == 0:
         return []
-    sim = min_sim
-    for _ in range(12):
+    # 预计算上三角相似度
+    pair_sims: List[Tuple[float, int, int]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            pair_sims.append((cosine(vectors[i], vectors[j]), i, j))
+
+    def run_at(thr: float) -> List[List[int]]:
         find, union = _union_find(n)
-        for i in range(n):
-            for j in range(i + 1, n):
-                if cosine(vectors[i], vectors[j]) >= sim:
-                    union(i, j)
+        for s, i, j in pair_sims:
+            if s >= thr:
+                union(i, j)
         groups: Dict[int, List[int]] = defaultdict(list)
         for i in range(n):
             groups[find(i)].append(i)
         clusters = [idxs for idxs in groups.values() if len(idxs) >= min_cluster_size]
         clusters.sort(key=len, reverse=True)
-        if len(clusters) <= max_clusters:
+        return clusters
+
+    thr = float(min_sim)
+    last: List[List[int]] = []
+    for _ in range(24):
+        clusters = run_at(thr)
+        last = clusters
+        if not clusters:
+            # 过严：略降
+            thr = max(0.25, thr - 0.04)
+            continue
+        largest = max(len(c) for c in clusters)
+        ok_size = largest <= max(int(n * max_frac), min_cluster_size * 4)
+        ok_count = 1 <= len(clusters) <= max_clusters
+        if ok_size and ok_count:
             return clusters[:max_clusters]
-        sim = min(0.95, sim + 0.05)
-    return clusters[:max_clusters]
+        # 过大：抬高阈值拆开
+        if not ok_size:
+            thr = min(0.95, thr + 0.03)
+            continue
+        # 簇过多：略降阈值合并
+        if len(clusters) > max_clusters:
+            thr = max(min_sim, thr - 0.02)
+            continue
+        return clusters[:max_clusters]
+    return last[:max_clusters]
 
 
 def keyword_cooccur_clusters(
@@ -115,10 +146,17 @@ def _build_cluster(cluster_id: str, items: Sequence[Dict[str, Any]], method: str
         )
         if len(quotes) >= 3:
             break
-    title_l3 = l3_counter.most_common(1)[0][0] if l3_counter else "未命名簇"
+    if l3_counter:
+        theme = l3_counter.most_common(1)[0][0]
+    elif len(l2s) == 1:
+        theme = l2s[0]
+    elif l2s:
+        theme = f"跨L2:{'+'.join(l2s[:3])}"
+    else:
+        theme = (quotes[0]["text"][:24] if quotes else "未命名簇")
     return {
         "cluster_id": cluster_id,
-        "theme": title_l3,
+        "theme": theme,
         "method": method,
         "l2_list": l2s,
         "cross_l2": len(l2s) >= 2,
