@@ -430,6 +430,13 @@ def run_batch_classify(
             )
             if force_pending or conf < low_confidence_threshold:
                 low_n += 1
+            # S6：洞察字段只追加进 meta，不改写 L1/L2/L3（VOC_INSIGHT_FIELDS_V1=1）
+            try:
+                from insight_fields import attach_insight_fields
+
+                meta = attach_insight_fields(meta, text)
+            except Exception:
+                logger.exception("attach_insight_fields 失败 opinion_id=%s", oid)
             v3_json = json.dumps(meta, ensure_ascii=False)
             force_i = 1 if force_pending else 0
             v3_l1, v3_l2, v3_l3, v3_conf, v3_mt = materialized_update_params(meta)
