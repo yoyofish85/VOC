@@ -5,6 +5,7 @@
 
 字段：
   intent / expected_action / severity / urgency / repeat_signal / root_cause_hint
+  / complaint_gist（抱怨要点）/ urgency_score（紧迫度 0-5）
 
 开关：VOC_INSIGHT_FIELDS_V1=1 启用（默认关闭，避免未验收即写库）。
 """
@@ -21,6 +22,8 @@ INSIGHT_KEYS = (
     "urgency",
     "repeat_signal",
     "root_cause_hint",
+    "complaint_gist",
+    "urgency_score",
 )
 
 INTENT_VALUES = ("报障", "求助", "咨询", "建议", "投诉升级", "表扬", "告知")
@@ -162,6 +165,48 @@ def _pick_root_cause_hint(text: str, l2: str, l3: str) -> str:
     return t[:40]
 
 
+_COMPLAINT_HIGH = re.compile(
+    r"无法启动|不能启动|无法行驶|动不了|刹车失灵|制动失效|起火|冒烟|自燃|"
+    r"漏电|失控|安全气囊|碰撞|漏油|动力中断|趴窝|抛锚",
+    re.I,
+)
+_COMPLAINT_MID = re.compile(
+    r"故障|异常|告警|报警|黑屏|死机|无法充电|充不进|门打不开|钥匙失灵|"
+    r"异响|卡顿|漂移|闪退|无法连接|打不开|无法登录|失灵",
+    re.I,
+)
+
+
+def _clean_edge(seg: str) -> str:
+    return re.sub(r"^[，。；、！？,;!?·\s]+", "", (seg or "").strip())
+
+
+def _pick_complaint_gist(text: str, l2: str, l3: str) -> str:
+    """抱怨要点：抽取最突出故障/不满短语（≤22 字），无命中回退 L3/L2。"""
+    t = (text or "").strip()
+    m = _COMPLAINT_HIGH.search(t) or _COMPLAINT_MID.search(t)
+    if m:
+        seg = t[max(0, m.start() - 6): m.end() + 10]
+        return _clean_edge(seg)[:22]
+    return _pick_root_cause_hint(t, l2, l3)
+
+
+def _pick_urgency_score(text: str, severity: str, intent: str, repeat: bool) -> int:
+    """紧迫度 0–5：severity(高2/中1) + 投诉升级1 + 复发1 + 时间催促词1。"""
+    score = 0
+    if severity == "高":
+        score += 2
+    elif severity == "中":
+        score += 1
+    if intent == "投诉升级":
+        score += 1
+    if repeat:
+        score += 1
+    if _RE_URGENT.search(text or ""):
+        score += 1
+    return min(score, 5)
+
+
 def extract_insight_fields(
     text: str,
     *,
@@ -174,13 +219,16 @@ def extract_insight_fields(
     expected = _pick_expected_action(text, intent)
     severity = _pick_severity(text, intent)
     urgency = _pick_urgency(text, severity)
+    repeat = _pick_repeat(text)
     return {
         "intent": intent,
         "expected_action": expected,
         "severity": severity,
         "urgency": urgency,
-        "repeat_signal": _pick_repeat(text),
+        "repeat_signal": repeat,
         "root_cause_hint": _pick_root_cause_hint(text, l2, l3),
+        "complaint_gist": _pick_complaint_gist(text, l2, l3),
+        "urgency_score": _pick_urgency_score(text, severity, intent, repeat),
     }
 
 

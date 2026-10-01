@@ -45,6 +45,17 @@ def test_intent_fault_and_escalate():
     assert e["severity"] == "高"
 
 
+def test_complaint_gist_and_urgency_score():
+    f = extract_insight_fields("车辆无法启动，动力中断趴窝了，多次催促仍未解决", l1="产品质量类")
+    assert "无法启动" in f["complaint_gist"]
+    assert len(f["complaint_gist"]) <= 22
+    assert f["urgency_score"] >= 4
+
+    c = extract_insight_fields("请问续航是否正常", l1="非问题")
+    assert c["urgency_score"] == 0
+    assert c["complaint_gist"]
+
+
 def test_intent_consult_praise_suggest():
     assert extract_insight_fields("请问续航是否正常", l1="非问题")["intent"] == "咨询"
     assert extract_insight_fields("销售顾问态度很好，非常感谢", l1="非问题")["intent"] == "表扬"
