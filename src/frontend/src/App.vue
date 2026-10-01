@@ -109,11 +109,9 @@ const onTabChange = (name) => {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  object-fit: contain;
+  object-fit: cover;
   background: #ffffff;
   border: 1px solid #3a4280;
-  padding: 3px;
-  box-sizing: border-box;
   display: block;
   flex: none;
 }
