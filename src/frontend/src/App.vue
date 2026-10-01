@@ -106,11 +106,14 @@ const onTabChange = (name) => {
 }
 
 .voc-logo {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
-  object-fit: cover;
+  object-fit: contain;
+  background: #ffffff;
   border: 1px solid #3a4280;
+  padding: 3px;
+  box-sizing: border-box;
   display: block;
   flex: none;
 }
