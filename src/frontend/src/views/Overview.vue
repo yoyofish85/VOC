@@ -37,9 +37,16 @@
     </el-alert>
 
     <div v-if="summaryData" class="dashboard-summary">
-      <div class="dashboard-summary-title">近 7 天汇报摘要</div>
-      <p>{{ summaryData.summary }}</p>
-      <div v-if="summaryData.ppt_text" class="dashboard-summary-ppt">{{ summaryData.ppt_text }}</div>
+      <div class="dashboard-summary-head">
+        <div class="dashboard-summary-title">近 7 天汇报摘要</div>
+        <el-button link type="primary" size="small" @click="showSummary = !showSummary">
+          {{ showSummary ? '收起' : '展开' }}
+        </el-button>
+      </div>
+      <div v-show="showSummary" class="dashboard-summary-body">
+        <p>{{ summaryData.summary }}</p>
+        <div v-if="summaryData.ppt_text" class="dashboard-summary-ppt">{{ summaryData.ppt_text }}</div>
+      </div>
     </div>
 
     <div class="stat-grid">
@@ -138,6 +145,7 @@ const summaryLoading = ref(false)
 const anomalies = ref([])
 const trend = ref([])
 const summaryData = ref(null)
+const showSummary = ref(false)
 const dash = ref({
   total: 0,
   reviewed_count: 0,
@@ -258,8 +266,8 @@ const renderCharts = () => {
   const pieData = (dash.value.l1_pie || []).map((x) => ({ name: x.name, value: x.value }))
   chartPie.setOption({
     backgroundColor: 'transparent',
-    color: ['#EECA1F', '#3B82F6', '#22c55e', '#a855f7'],
-    tooltip: { trigger: 'item', backgroundColor: 'rgba(15,20,25,0.94)', borderColor: '#334155', textStyle: { color: '#e2e8f0' } },
+    color: ['#00E5FF', '#3B82F6', '#22c55e', '#a855f7'],
+    tooltip: { trigger: 'item', backgroundColor: 'rgba(15,20,51,0.94)', borderColor: '#2a3160', textStyle: { color: '#e2e8f0' } },
     legend: { bottom: 2, textStyle: { color: '#cbd5e1' } },
     series: [{
       type: 'pie',
@@ -278,20 +286,15 @@ const renderCharts = () => {
   const barData = dash.value.l2_top5 || dash.value.l2_bar || []
   chartBar.setOption({
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,20,25,0.94)', borderColor: '#334155', textStyle: { color: '#e2e8f0' } },
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,20,51,0.94)', borderColor: '#2a3160', textStyle: { color: '#e2e8f0' } },
     grid: { left: '2%', right: '8%', top: 12, bottom: '3%', containLabel: true },
     xAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
     yAxis: { type: 'category', data: barData.map((x) => x.name).reverse(), axisLabel: { color: '#cbd5e1' } },
     series: [{
       type: 'bar',
       data: barData.map((x) => x.value).reverse(),
-      itemStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-          { offset: 0, color: '#3B82F6' },
-          { offset: 1, color: '#EECA1F' }
-        ])
-      },
-      label: { show: true, position: 'right', color: '#fef08a' }
+      itemStyle: { color: '#3B82F6' },
+      label: { show: true, position: 'right', color: '#cbd5e1' }
     }]
   })
   chartBar.off('click')
@@ -308,9 +311,9 @@ const renderCharts = () => {
   const src = dash.value.trend_30d || []
   chartTrend.setOption({
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,20,25,0.94)', borderColor: '#334155', textStyle: { color: '#e2e8f0' } },
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,20,51,0.94)', borderColor: '#2a3160', textStyle: { color: '#e2e8f0' } },
     grid: { left: '3%', right: '4%', top: 24, bottom: '3%', containLabel: true },
-    xAxis: { type: 'category', data: src.map((x) => x.date), axisLabel: { color: '#94a3b8' }, axisLine: { lineStyle: { color: '#475569' } } },
+    xAxis: { type: 'category', data: src.map((x) => x.date), axisLabel: { color: '#94a3b8' }, axisLine: { lineStyle: { color: '#3a4280' } } },
     yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#1f2937' } } },
     series: [{
       type: 'line',
@@ -318,7 +321,7 @@ const renderCharts = () => {
       symbolSize: 7,
       areaStyle: { color: 'rgba(59, 130, 246, 0.16)' },
       lineStyle: { color: '#3B82F6', width: 3 },
-      itemStyle: { color: '#EECA1F' },
+      itemStyle: { color: '#3B82F6' },
       label: { show: true, color: '#cbd5e1', fontSize: 9 },
       data: src.map((x) => x.count)
     }]
@@ -371,7 +374,7 @@ defineExpose({ refreshDashboard })
   padding: 12px 14px;
   border-left: 3px solid #3B82F6;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.68);
+  background: rgba(15, 20, 51, 0.68);
   color: #dbeafe;
 }
 .dashboard-summary-title {
@@ -379,6 +382,17 @@ defineExpose({ refreshDashboard })
   color: #f8fafc;
   font-size: 14px;
   font-weight: 700;
+}
+.dashboard-summary-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.dashboard-summary-head .dashboard-summary-title {
+  margin-bottom: 0;
+}
+.dashboard-summary-body {
+  margin-top: 6px;
 }
 .dashboard-summary p {
   margin: 0;
@@ -406,8 +420,8 @@ defineExpose({ refreshDashboard })
 .stat-card {
   border-radius: 10px;
   padding: 16px 18px;
-  border: 1px solid #334155;
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.86), rgba(15, 23, 42, 0.82));
+  border: 1px solid #2a3160;
+  background: linear-gradient(180deg, rgba(26, 33, 80, 0.86), rgba(15, 20, 51, 0.82));
 }
 .stat-num {
   font-size: 30px;
@@ -422,7 +436,7 @@ defineExpose({ refreshDashboard })
 .stat-total .stat-num { color: #f8fafc; }
 .stat-pending .stat-num { color: #f97316; }
 .stat-ok .stat-num { color: #22c55e; }
-.stat-archive .stat-num { color: #EECA1F; }
+.stat-archive .stat-num { color: #00E5FF; }
 .stat-new .stat-num { color: #3B82F6; }
 .accuracy-grid {
   display: grid;
@@ -437,8 +451,8 @@ defineExpose({ refreshDashboard })
   gap: 16px;
   padding: 14px 18px;
   border-radius: 10px;
-  border: 1px solid #334155;
-  background: rgba(30, 41, 59, 0.58);
+  border: 1px solid #2a3160;
+  background: rgba(26, 33, 80, 0.58);
 }
 .accuracy-label {
   color: #f1f5f9;
@@ -453,7 +467,7 @@ defineExpose({ refreshDashboard })
 .accuracy-value {
   min-width: 110px;
   text-align: right;
-  color: #EECA1F;
+  color: #00E5FF;
   font-size: 28px;
   font-weight: 800;
 }
@@ -471,8 +485,8 @@ defineExpose({ refreshDashboard })
   }
 }
 .chart-card {
-  background: rgba(15, 23, 42, 0.66);
-  border: 1px solid #334155;
+  background: rgba(15, 20, 51, 0.66);
+  border: 1px solid #2a3160;
   border-radius: 10px;
   padding: 12px 14px;
 }
@@ -505,9 +519,9 @@ defineExpose({ refreshDashboard })
 .trend-panel {
   margin-top: 12px;
   padding: 12px 14px;
-  border: 1px solid #334155;
+  border: 1px solid #2a3160;
   border-radius: 10px;
-  background: rgba(15, 23, 42, 0.62);
+  background: rgba(15, 20, 51, 0.62);
 }
 .trend-title {
   margin-bottom: 10px;
@@ -533,13 +547,13 @@ defineExpose({ refreshDashboard })
   justify-content: center;
   height: 78px;
   border-radius: 6px;
-  background: rgba(30, 41, 59, 0.8);
+  background: rgba(26, 33, 80, 0.8);
   overflow: hidden;
 }
 .trend-bar-fill {
   width: 100%;
   min-height: 2px;
-  background: linear-gradient(180deg, #EECA1F, #3B82F6);
+  background: linear-gradient(180deg, #00E5FF, #3B82F6);
 }
 .trend-label {
   margin-top: 6px;

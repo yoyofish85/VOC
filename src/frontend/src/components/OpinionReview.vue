@@ -1,15 +1,15 @@
 <template>
   <div class="workbench">
-    <!-- 流程步骤 -->
-    <el-steps :active="stepActive" finish-status="success" align-center class="process-steps">
-      <el-step title="上传数据" description="导入 CSV" />
-      <el-step title="智能分类" description="规则/聚类/可选 LLM" />
-      <el-step title="人工复核" description="可校正一二级·三级关键词自动" />
-      <el-step title="归档回流" description="年度归档 / 金标更新" />
-    </el-steps>
+    <!-- 吸顶操作区：步骤条 + 主操作 -->
+    <div class="ops-card">
+      <el-steps :active="stepActive" finish-status="success" align-center class="process-steps">
+        <el-step title="上传数据" description="导入 CSV" />
+        <el-step title="智能分类" description="规则/聚类/可选 LLM" />
+        <el-step title="人工复核" description="可校正一二级·三级关键词自动" />
+        <el-step title="归档回流" description="年度归档 / 金标更新" />
+      </el-steps>
 
-    <!-- 固定操作条 -->
-    <div class="action-bar">
+      <div class="action-bar">
       <div class="action-primary">
         <el-button
           type="primary"
@@ -64,6 +64,7 @@
         <el-tag v-else-if="classifyState === 'done'" type="success">分类完成</el-tag>
         <el-tag v-else-if="classifyState === 'error'" type="danger">分类异常</el-tag>
       </div>
+    </div>
     </div>
 
     <!-- 筛选区 -->
@@ -121,8 +122,11 @@
           <el-option label="已复核·改正二级" value="human_fixed_l2" />
         </el-select>
         <el-input v-model="reviewerName" placeholder="复核人（写入审计）" clearable class="filter-item" style="width: 140px" />
+        <el-button text type="primary" @click="showAdvanced = !showAdvanced">高级筛选 {{ showAdvanced ? '▲' : '▼' }}</el-button>
+        <el-button type="primary" @click="runReviewQueryNow">查询</el-button>
+        <el-button @click="resetFilters">重置</el-button>
       </div>
-      <div class="filter-row second">
+      <div v-show="showAdvanced" class="filter-row second">
         <el-select v-model="filterL1" placeholder="一级标签" clearable filterable class="filter-item" @change="onL1FilterChange">
           <el-option v-for="x in l1Options" :key="x" :label="x" :value="x" />
         </el-select>
@@ -166,12 +170,10 @@
           <span class="conf-label">置信度</span>
           <el-slider v-model="confRange" range :min="0" :max="1" :step="0.01" @change="debouncedReloadReviewList" />
         </div>
-        <el-button type="primary" @click="runReviewQueryNow">查询</el-button>
-        <el-button @click="resetFilters">重置</el-button>
       </div>
     </div>
 
-    <!-- 批量工具条 -->
+    <!-- 批量工具条：主按钮 + 更多折叠 -->
     <div class="batch-toolbar">
         <el-button
           type="success"
@@ -192,30 +194,19 @@
         >
           确认归档 ({{ selectedRows.length }})
         </el-button>
-      <el-button
-        type="success"
-        size="large"
-        :disabled="!selectedBatch"
-        :loading="batchStatusLoading"
-        @click="checkBatchArchive"
-      >
-        归档年度数据
-      </el-button>
-      <el-button
-        type="info"
-        plain
-        :loading="draftSaveLoading"
-        :disabled="!reviewList.length"
-        @click="saveDraftReviews"
-      >
-        暂存复核结果
-      </el-button>
-      <el-button plain :disabled="!selectedRows.length" @click="batchSaveReviews">仅批量保存（不回流）</el-button>
-      <el-button type="warning" plain :disabled="!selectedRows.length" @click="batchMarkPending">批量标为待复核</el-button>
-      <el-button plain :disabled="!selectedRows.length || classifyRunning" :loading="classifyRunning" @click="reclassifySelected">
-        批量重新分类
-      </el-button>
-      <el-button :disabled="!selectedBatch" @click="exportCsv">导出当前批次 CSV</el-button>
+      <el-popover placement="bottom-start" trigger="click" :width="220">
+        <template #reference>
+          <el-button>更多操作 ▾</el-button>
+        </template>
+        <div class="more-actions">
+          <el-button plain :disabled="!selectedBatch" :loading="batchStatusLoading" @click="checkBatchArchive">归档年度数据</el-button>
+          <el-button type="info" plain :loading="draftSaveLoading" :disabled="!reviewList.length" @click="saveDraftReviews">暂存复核结果</el-button>
+          <el-button plain :disabled="!selectedRows.length" @click="batchSaveReviews">仅批量保存（不回流）</el-button>
+          <el-button type="warning" plain :disabled="!selectedRows.length" @click="batchMarkPending">批量标为待复核</el-button>
+          <el-button plain :disabled="!selectedRows.length || classifyRunning" :loading="classifyRunning" @click="reclassifySelected">批量重新分类</el-button>
+          <el-button :disabled="!selectedBatch" @click="exportCsv">导出当前批次 CSV</el-button>
+        </div>
+      </el-popover>
       <span class="batch-hint"
         >「确认所选正确」将勾选行标为已复核（人工标签为空时采用模型结果，不改模型分类）。「确认归档」再写入年度 CSV。「归档年度数据」检查整批完成状态并显示批次准确率。</span
       >
@@ -252,6 +243,14 @@
     >
       {{ listErrorHint }}
     </el-alert>
+
+    <!-- 状态图例 -->
+    <div class="status-legend">
+      <span class="lg-item"><i class="lg-dot lg-lowconf"></i>低置信(&lt;0.52)</span>
+      <span class="lg-item"><i class="lg-dot lg-doubt"></i>存疑待复核</span>
+      <span class="lg-item"><i class="lg-dot lg-done"></i>已复核</span>
+      <span class="lg-item"><i class="lg-dot lg-blocked"></i>整批未就绪</span>
+    </div>
 
     <!-- 表格 -->
     <el-table
@@ -561,6 +560,7 @@ const pendingOnly = ref(false)
 const mismatchFilter = ref('')
 const reviewerName = ref(typeof localStorage !== 'undefined' ? localStorage.getItem('voc_reviewer') || '' : '')
 const confRange = ref([0, 1])
+const showAdvanced = ref(false)
 const yearOptions = ref(['2024', '2025', '2026'])
 const summaryYearFilter = ref('')
 const summaryMonthPicker = ref('')
@@ -1948,12 +1948,19 @@ onUnmounted(() => {
   padding: 0 4px 24px;
 }
 
-.process-steps {
-  margin-bottom: 20px;
-  padding: 12px 8px;
-  background: #fafbfc;
+.ops-card {
+  background: linear-gradient(180deg, #141a3f 70%, rgba(20, 26, 63, 0.92));
+  border: 1px solid #2a3160;
   border-radius: 10px;
-  border: 1px solid #ebeef5;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.process-steps {
+  margin: 0 0 10px;
+  padding: 0;
+  background: transparent;
+  border: none;
 }
 
 .action-bar {
@@ -1962,13 +1969,6 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
-  position: sticky;
-  top: 0;
-  z-index: 15;
-  background: linear-gradient(180deg, #fff 70%, rgba(255, 255, 255, 0.92));
-  padding: 12px 0;
-  border-bottom: 1px solid #ebeef5;
 }
 
 .action-primary {
@@ -2001,7 +2001,7 @@ onUnmounted(() => {
 
 .upload-summary {
   font-size: 12px;
-  color: #606266;
+  color: #94a3b8;
   line-height: 1.4;
   max-width: 520px;
 }
@@ -2024,8 +2024,8 @@ onUnmounted(() => {
 }
 
 .filter-card {
-  background: #fff;
-  border: 1px solid #ebeef5;
+  background: #141a3f;
+  border: 1px solid #2a3160;
   border-radius: 10px;
   padding: 14px 16px;
   margin-bottom: 12px;
@@ -2074,7 +2074,7 @@ onUnmounted(() => {
 }
 .conf-label {
   font-size: 12px;
-  color: #909399;
+  color: #94a3b8;
   white-space: nowrap;
 }
 
@@ -2090,6 +2090,31 @@ onUnmounted(() => {
   margin-bottom: 12px;
 }
 
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.lg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.lg-lowconf { background: #f59e0b; }
+.lg-doubt { background: rgba(245, 158, 11, 0.45); }
+.lg-done { background: #64748b; }
+.lg-blocked { background: #ef4444; }
+
 .batch-toolbar .btn-confirm-archive {
   font-weight: 600;
   padding-left: 22px;
@@ -2098,8 +2123,20 @@ onUnmounted(() => {
 }
 .batch-hint {
   font-size: 13px;
-  color: #909399;
+  color: #94a3b8;
   margin-left: 8px;
+}
+
+.more-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px;
+}
+.more-actions .el-button {
+  margin: 0;
+  justify-content: flex-start;
+  width: 100%;
 }
 
 .data-table {
@@ -2144,15 +2181,15 @@ onUnmounted(() => {
   margin-bottom: 4px;
 }
 .v3-k {
-  color: #909399;
+  color: #94a3b8;
   min-width: 72px;
 }
 .v3-meta {
-  color: #909399;
+  color: #94a3b8;
   font-size: 11px;
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px dashed #ebeef5;
+  border-top: 1px dashed #2a3160;
 }
 .tag-cluster {
   font-weight: 600;
@@ -2163,7 +2200,7 @@ onUnmounted(() => {
   gap: 4px;
 }
 .muted {
-  color: #909399;
+  color: #94a3b8;
   font-size: 12px;
 }
 
@@ -2175,7 +2212,7 @@ onUnmounted(() => {
 .year-section {
   margin-top: 28px;
   padding-top: 20px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid #2a3160;
 }
 .year-head {
   display: flex;
@@ -2186,7 +2223,7 @@ onUnmounted(() => {
 .year-head h3 {
   margin: 0;
   font-size: 16px;
-  color: #303133;
+  color: #f8fafc;
 }
 
 .year-actions {
@@ -2198,7 +2235,7 @@ onUnmounted(() => {
 
 .year-tip {
   font-size: 12px;
-  color: #909399;
+  color: #94a3b8;
   margin: 0 0 12px;
   line-height: 1.5;
 }
@@ -2223,7 +2260,7 @@ onUnmounted(() => {
 
 .l1-locked .hint {
   font-size: 12px;
-  color: #909399;
+  color: #94a3b8;
 }
 
 .mb8 {
@@ -2233,9 +2270,9 @@ onUnmounted(() => {
 .drawer-kw {
   font-size: 13px;
   line-height: 1.6;
-  color: #303133;
+  color: #f8fafc;
   padding: 10px;
-  background: #f5f7fa;
+  background: #1a2150;
   border-radius: 8px;
   word-break: break-all;
   min-height: 48px;
@@ -2250,17 +2287,17 @@ onUnmounted(() => {
 .drawer-field label {
   display: block;
   font-size: 12px;
-  color: #909399;
+  color: #94a3b8;
   margin-bottom: 6px;
 }
 .drawer-text {
   font-size: 13px;
   line-height: 1.6;
-  color: #303133;
+  color: #f8fafc;
   max-height: 200px;
   overflow: auto;
   padding: 8px;
-  background: #f5f7fa;
+  background: #1a2150;
   border-radius: 6px;
 }
 .review-status-cell {
@@ -2277,22 +2314,22 @@ onUnmounted(() => {
 }
 
 :deep(.row-done) {
-  background: #ebeef5 !important;
-  color: #909399;
+  background: #1a2233 !important;
+  color: #64748b;
 }
 :deep(.row-done) .el-select .el-input__wrapper {
-  background: #f5f7fa;
+  background: #1a2150;
 }
 :deep(.row-doubt) {
-  background: #fdf6ec !important;
+  background: rgba(245, 158, 11, 0.08) !important;
 }
 :deep(.row-lowconf) {
-  box-shadow: inset 3px 0 0 #e6a23c;
-  background: #fffaf0 !important;
+  box-shadow: inset 3px 0 0 #f59e0b;
+  background: rgba(245, 158, 11, 0.06) !important;
 }
 :deep(.row-batch-blocked) {
-  box-shadow: inset 3px 0 0 #f56c6c;
-  background: #fef0f0 !important;
+  box-shadow: inset 3px 0 0 #ef4444;
+  background: rgba(239, 68, 68, 0.08) !important;
 }
 .batch-unreviewed-alert {
   margin-bottom: 10px;
@@ -2307,21 +2344,21 @@ onUnmounted(() => {
 }
 .batch-unreviewed-line .muted,
 .batch-unreviewed-detail .muted {
-  color: #909399;
+  color: #94a3b8;
 }
 .mt4 {
   margin-top: 4px;
 }
 :deep(.kw-hl) {
-  color: #b88230;
+  color: #00e5ff;
   font-weight: 600;
-  background: #fff7e6;
+  background: rgba(245, 158, 11, 0.16);
   padding: 0 2px;
   border-radius: 2px;
 }
 :deep(.l2-search-hl) {
-  background: #fdf6ec;
-  color: #c45656;
+  background: rgba(239, 68, 68, 0.14);
+  color: #f87171;
   font-weight: 600;
   padding: 0 2px;
   border-radius: 2px;
