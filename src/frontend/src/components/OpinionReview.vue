@@ -2144,11 +2144,7 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-/* 大数据量时减轻布局/绘制压力（兼容 Chromium；不影响交互列） */
-.data-table :deep(.el-table__body tr) {
-  content-visibility: auto;
-  contain-intrinsic-size: 52px 100%;
-}
+/* 已移除 content-visibility 性能 hack：它会破坏 fixed 列背景，导致横向滚动时原文/模型分类穿透重叠到人工列 */
 
 .data-table :deep(.cell) {
   line-height: 1.55;

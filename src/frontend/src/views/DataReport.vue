@@ -37,15 +37,20 @@
     </section>
 
     <div class="lotus-chart-grid">
+      <div class="report-seg"><el-radio-group v-model="reportTab" size="small"><el-radio-button label="charts">趋势图表</el-radio-button><el-radio-button label="summary">AI 智能汇总</el-radio-button><el-radio-button label="theme">客诉主题台账</el-radio-button></el-radio-group></div>
+      <div v-show="reportTab === 'summary'">
       <div v-if="summaryData" class="lotus-card lotus-summary-card">
         <div class="lotus-card-head">
           <div>
             <div class="lotus-card-title">AI 智能汇总 · Qwen2.5 14B</div>
             <div class="lotus-card-title-en">高频问题、风险归因与 PPT 文案</div>
           </div>
-          <el-tag size="small" :type="summaryData.cache_hit ? 'info' : 'success'">
-            {{ summaryData.cache_hit ? '缓存' : '本地模型' }}
-          </el-tag>
+          <div class="lotus-card-actions">
+            <el-tag size="small" :type="summaryData.cache_hit ? 'info' : 'success'">
+              {{ summaryData.cache_hit ? '缓存' : '本地模型' }}
+            </el-tag>
+            <el-button link type="primary" size="small" @click="showSummaryDetail = !showSummaryDetail">{{ showSummaryDetail ? '收起更多' : '展开更多' }}</el-button>
+          </div>
         </div>
         <p class="summary-main">{{ summaryData.summary }}</p>
         <div v-if="summaryData.volume" class="summary-volume">
@@ -72,6 +77,7 @@
             <p><strong>建议：</strong>{{ (summaryData.actions || []).join('；') || '—' }}</p>
           </div>
         </div>
+        <div v-show="showSummaryDetail">
         <div v-if="(summaryData.trends || []).length" class="summary-trends">
           <div class="summary-subtitle">趋势观察</div>
           <ul>
@@ -87,6 +93,7 @@
           </div>
         </div>
         <div class="ppt-text">{{ summaryData.ppt_text }}</div>
+        </div>
       </div>
 
       <div class="lotus-card lotus-card-wide weekly-card">
@@ -133,7 +140,8 @@
         </div>
         <el-empty v-else description="暂无周报，点击生成本周周报" :image-size="64" />
       </div>
-
+      </div>
+      <div v-show="reportTab === 'theme'">
       <div class="lotus-card lotus-card-wide theme-evidence-card">
         <div class="lotus-card-head">
           <div>
@@ -228,7 +236,8 @@
           </div>
         </div>
       </div>
-
+      </div>
+      <div v-show="reportTab === 'charts'">
       <div class="lotus-card">
         <div class="lotus-card-head">
           <div>
@@ -325,6 +334,7 @@
           </el-table-column>
         </el-table>
       </div>
+      </div>
     </div>
   </div>
 </template>
@@ -369,6 +379,8 @@ const dateTo = ref(defaultTo)
 const region = ref('all')
 const topN = ref(8)
 const subRank = ref(1)
+const reportTab = ref('charts')
+const showSummaryDetail = ref(false)
 const summaryLoading = ref(false)
 const summaryData = ref(null)
 const issueL1 = ref('')
@@ -522,8 +534,8 @@ const baseDark = () => ({
   textStyle: { color: '#e2e8f0' },
   tooltip: {
     trigger: 'axis',
-    backgroundColor: 'rgba(15,20,25,0.92)',
-    borderColor: '#334155',
+    backgroundColor: 'rgba(15,20,51,0.92)',
+    borderColor: '#2a3160',
     textStyle: { color: '#e2e8f0' }
   }
 })
@@ -776,14 +788,14 @@ function renderOverview (data) {
     xAxis: {
       type: 'category',
       data: months,
-      axisLine: { lineStyle: { color: '#475569' } },
+      axisLine: { lineStyle: { color: '#3a4280' } },
       axisLabel: { color: '#94a3b8' }
     },
     yAxis: {
       type: 'value',
       name: '客诉量 / Count',
       minInterval: 1,
-      splitLine: { lineStyle: { color: '#1e293b' } },
+      splitLine: { lineStyle: { color: '#1a2150' } },
       axisLabel: { color: '#94a3b8' }
     },
     series: [
@@ -791,7 +803,7 @@ function renderOverview (data) {
         name: prod,
         type: 'bar',
         data: s[prod] || [],
-        itemStyle: { color: '#EECA1F' },
+        itemStyle: { color: '#00E5FF' },
         label: { show: true, position: 'top', color: '#fef3c7', fontSize: 10 }
       },
       {
@@ -807,7 +819,7 @@ function renderOverview (data) {
         type: 'text',
         right: 16,
         top: 10,
-        style: { text: 'LOTUS', fill: '#EECA1F', font: 'bold 14px sans-serif' }
+        style: { text: 'LOTUS', fill: '#00E5FF', font: 'bold 14px sans-serif' }
       }
     ]
   }, { notMerge: true })
@@ -841,13 +853,13 @@ function renderSubTrend (data) {
     xAxis: {
       type: 'category',
       data: months,
-      axisLine: { lineStyle: { color: '#475569' } },
+      axisLine: { lineStyle: { color: '#3a4280' } },
       axisLabel: { color: '#94a3b8' }
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
-      splitLine: { lineStyle: { color: '#1e293b' } },
+      splitLine: { lineStyle: { color: '#1a2150' } },
       axisLabel: { color: '#94a3b8' }
     },
     series: lines.map((ln) => ({
@@ -878,7 +890,7 @@ function renderTopStack (data) {
   const months = data.months || []
   const series = data.series || []
   const maxTotal = Math.max(0, ...series.map((x) => x.total || 0))
-  const palette = ['#EECA1F', '#3B82F6', '#22c55e', '#a855f7', '#f97316', '#14b8a6', '#ec4899', '#64748b']
+  const palette = ['#00E5FF', '#3B82F6', '#22c55e', '#a855f7', '#f97316', '#14b8a6', '#ec4899', '#64748b']
   c3.setOption({
     ...baseDark(),
     title: [
@@ -900,12 +912,12 @@ function renderTopStack (data) {
     xAxis: {
       type: 'category',
       data: months,
-      axisLine: { lineStyle: { color: '#475569' } },
+      axisLine: { lineStyle: { color: '#3a4280' } },
       axisLabel: { color: '#94a3b8' }
     },
     yAxis: {
       type: 'value',
-      splitLine: { lineStyle: { color: '#1e293b' } },
+      splitLine: { lineStyle: { color: '#1a2150' } },
       axisLabel: { color: '#94a3b8' }
     },
     series: series.map((s, i) => ({
@@ -934,7 +946,7 @@ function renderTopStack (data) {
         type: 'text',
         right: 12,
         top: 6,
-        style: { text: 'LOTUS', fill: '#EECA1F', font: 'bold 14px sans-serif' }
+        style: { text: 'LOTUS', fill: '#00E5FF', font: 'bold 14px sans-serif' }
       }
     ]
   }, { notMerge: true })
@@ -970,13 +982,13 @@ function renderSingleIssueTrend (data) {
     xAxis: {
       type: 'category',
       data: months,
-      axisLine: { lineStyle: { color: '#475569' } },
+      axisLine: { lineStyle: { color: '#3a4280' } },
       axisLabel: { color: '#94a3b8' }
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
-      splitLine: { lineStyle: { color: '#1e293b' } },
+      splitLine: { lineStyle: { color: '#1a2150' } },
       axisLabel: { color: '#94a3b8' }
     },
     series: [
@@ -986,8 +998,8 @@ function renderSingleIssueTrend (data) {
         smooth: true,
         symbolSize: 9,
         data: values,
-        itemStyle: { color: '#EECA1F' },
-        lineStyle: { width: 3, color: '#EECA1F' },
+        itemStyle: { color: '#00E5FF' },
+        lineStyle: { width: 3, color: '#00E5FF' },
         areaStyle: { color: 'rgba(238,202,31,0.13)' },
         label: { show: true, color: '#fef08a', fontSize: 10 }
       }
@@ -997,7 +1009,7 @@ function renderSingleIssueTrend (data) {
         type: 'text',
         right: 12,
         top: 6,
-        style: { text: 'LOTUS', fill: '#EECA1F', font: 'bold 14px sans-serif' }
+        style: { text: 'LOTUS', fill: '#00E5FF', font: 'bold 14px sans-serif' }
       }
     ]
   }, { notMerge: true })
@@ -1008,7 +1020,7 @@ function exportPng (which) {
   const name = names[which] || 'voc-chart'
   const inst = which === 1 ? c1 : which === 2 ? c2 : c3
   if (!inst) return
-  const url = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0f1419' })
+  const url = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0f1433' })
   const a = document.createElement('a')
   a.href = url
   a.download = `${name}-${dateFrom.value}_${dateTo.value}.png`
@@ -1041,7 +1053,7 @@ onUnmounted(() => {
 <style scoped>
 .lotus-report {
   min-height: 100%;
-  background: radial-gradient(ellipse at top, #1a2332 0%, #0f1419 55%);
+  background: radial-gradient(ellipse at top, #1a2048 0%, #0f1433 55%);
   color: #e2e8f0;
   padding: 16px 20px 32px;
   box-sizing: border-box;
@@ -1052,7 +1064,7 @@ onUnmounted(() => {
   align-items: flex-start;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #334155;
+  border-bottom: 1px solid #2a3160;
 }
 .lotus-h1 {
   margin: 0;
@@ -1078,13 +1090,13 @@ onUnmounted(() => {
   color: #eecc1f;
   letter-spacing: 0.2em;
   padding: 8px 12px;
-  border: 1px solid #475569;
+  border: 1px solid #3a4280;
   border-radius: 8px;
-  background: rgba(30, 41, 59, 0.5);
+  background: rgba(26, 33, 80, 0.5);
 }
 .lotus-filters {
-  background: rgba(30, 41, 59, 0.55);
-  border: 1px solid #334155;
+  background: rgba(26, 33, 80, 0.55);
+  border: 1px solid #2a3160;
   border-radius: 10px;
   padding: 12px 16px 4px;
   margin-bottom: 18px;
@@ -1098,8 +1110,8 @@ onUnmounted(() => {
   gap: 18px;
 }
 .lotus-card {
-  background: rgba(15, 23, 42, 0.65);
-  border: 1px solid #334155;
+  background: rgba(15, 20, 51, 0.65);
+  border: 1px solid #2a3160;
   border-radius: 12px;
   padding: 12px 14px 8px;
 }
@@ -1135,7 +1147,7 @@ onUnmounted(() => {
   padding: 12px 14px 4px;
   border: 1px solid rgba(71, 85, 105, 0.8);
   border-radius: 10px;
-  background: rgba(30, 41, 59, 0.46);
+  background: rgba(26, 33, 80, 0.46);
 }
 .issue-filter-title {
   display: flex;
@@ -1163,7 +1175,7 @@ onUnmounted(() => {
   padding: 12px 16px;
   border-left: 3px solid #409eff;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.68);
+  background: rgba(15, 20, 51, 0.68);
   color: #e5e7eb;
   font-size: 15px;
   line-height: 1.7;
@@ -1190,7 +1202,7 @@ onUnmounted(() => {
 .summary-grid > div {
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.42);
+  background: rgba(15, 20, 51, 0.42);
 }
 .summary-grid ul {
   margin: 4px 0 0;
@@ -1236,7 +1248,7 @@ onUnmounted(() => {
   margin-top: 12px;
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.42);
+  background: rgba(15, 20, 51, 0.42);
   color: #cbd5e1;
   font-size: 13px;
 }
@@ -1275,7 +1287,7 @@ onUnmounted(() => {
 .quote-item {
   margin-top: 8px;
   padding: 8px 10px;
-  background: rgba(30, 41, 59, 0.45);
+  background: rgba(26, 33, 80, 0.45);
   border-radius: 6px;
 }
 .quote-issue {
@@ -1315,7 +1327,7 @@ onUnmounted(() => {
   margin-top: 12px;
   padding: 10px 12px;
   border-left: 3px solid #3b82f6;
-  background: rgba(30, 41, 59, 0.55);
+  background: rgba(26, 33, 80, 0.55);
   color: #dbeafe;
   line-height: 1.65;
 }
@@ -1333,5 +1345,14 @@ onUnmounted(() => {
   .weekly-actions {
     justify-content: flex-start;
   }
+}
+.report-seg {
+  grid-column: 1 / -1;
+  margin-bottom: 6px;
+}
+.lotus-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

@@ -2,7 +2,7 @@
   <div class="voc-shell">
     <header class="voc-header">
       <div class="voc-brand">
-        <span class="voc-logo">VOC</span>
+        <img class="voc-logo" :src="lotusLogo" alt="Lotus 路特斯" />
         <div>
           <h1>舆情复核工作台</h1>
           <p class="voc-sub">企业级舆情 · 三级标签 · 人机协同</p>
@@ -40,6 +40,7 @@ import { nextTick, ref } from 'vue'
 import OpinionReview from './components/OpinionReview.vue'
 import DataReport from './views/DataReport.vue'
 import Overview from './views/Overview.vue'
+import lotusLogo from './assets/Lotus.jpeg'
 import { ElMessage } from 'element-plus'
 
 const activeTab = ref('overview')
@@ -83,7 +84,7 @@ const onTabChange = (name) => {
 <style scoped>
 .voc-shell {
   min-height: 100vh;
-  background: radial-gradient(ellipse at top, #1a2332 0%, #0f1419 58%);
+  background: radial-gradient(ellipse at top, #1a2048 0%, #0f1433 58%);
   padding: 0 20px 28px;
   box-sizing: border-box;
   color: #e2e8f0;
@@ -105,18 +106,13 @@ const onTabChange = (name) => {
 }
 
 .voc-logo {
-  width: 48px;
-  height: 48px;
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid #475569;
-  color: #EECA1F;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 14px;
-  letter-spacing: 0.5px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid #3a4280;
+  display: block;
+  flex: none;
 }
 
 .voc-brand h1 {
@@ -141,8 +137,8 @@ const onTabChange = (name) => {
 }
 
 .voc-tabs {
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid #334155;
+  background: rgba(15, 20, 51, 0.72);
+  border: 1px solid #2a3160;
   border-radius: 12px;
   padding: 8px 16px 20px;
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
@@ -159,11 +155,11 @@ const onTabChange = (name) => {
 }
 
 .voc-tabs :deep(.el-tabs__item.is-active) {
-  color: #EECA1F;
+  color: #00E5FF;
 }
 
 .voc-tabs :deep(.el-tabs__active-bar) {
-  background-color: #EECA1F;
+  background-color: #00E5FF;
 }
 
 .overview-wrap {
@@ -193,8 +189,8 @@ const onTabChange = (name) => {
 .stat-card {
   border-radius: 10px;
   padding: 16px 18px;
-  border: 1px solid #334155;
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.86), rgba(15, 23, 42, 0.82));
+  border: 1px solid #2a3160;
+  background: linear-gradient(180deg, rgba(26, 33, 80, 0.86), rgba(15, 20, 51, 0.82));
 }
 
 .stat-num {
@@ -212,7 +208,7 @@ const onTabChange = (name) => {
 .stat-total .stat-num { color: #f8fafc; }
 .stat-pending .stat-num { color: #f97316; }
 .stat-ok .stat-num { color: #22c55e; }
-.stat-archive .stat-num { color: #EECA1F; }
+.stat-archive .stat-num { color: #00E5FF; }
 .stat-new .stat-num { color: #3B82F6; }
 
 .accuracy-grid {
@@ -229,8 +225,8 @@ const onTabChange = (name) => {
   gap: 16px;
   padding: 14px 18px;
   border-radius: 10px;
-  border: 1px solid #334155;
-  background: rgba(30, 41, 59, 0.58);
+  border: 1px solid #2a3160;
+  background: rgba(26, 33, 80, 0.58);
 }
 
 .accuracy-label {
@@ -248,7 +244,7 @@ const onTabChange = (name) => {
 .accuracy-value {
   min-width: 110px;
   text-align: right;
-  color: #EECA1F;
+  color: #00E5FF;
   font-size: 28px;
   font-weight: 800;
 }
@@ -266,8 +262,8 @@ const onTabChange = (name) => {
 }
 
 .chart-card {
-  background: rgba(15, 23, 42, 0.66);
-  border: 1px solid #334155;
+  background: rgba(15, 20, 51, 0.66);
+  border: 1px solid #2a3160;
   border-radius: 10px;
   padding: 12px 14px;
 }
