@@ -40,7 +40,7 @@ import { nextTick, ref } from 'vue'
 import OpinionReview from './components/OpinionReview.vue'
 import DataReport from './views/DataReport.vue'
 import Overview from './views/Overview.vue'
-import lotusLogo from './assets/Lotus.jpeg'
+import lotusLogo from './assets/Lotus.png'
 import { ElMessage } from 'element-plus'
 
 const activeTab = ref('overview')
