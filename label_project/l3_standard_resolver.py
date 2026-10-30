@@ -219,3 +219,20 @@ def resolve_l3_with_standard(
         "confidence": 0.40,
         "match_type": "l3_pending",
     }
+
+def suggest_l3_candidates(
+    text: str, l1: str, l2: str, *, index: Optional[dict] = None, top_n: int = 3
+) -> List[tuple]:
+    """为「待归类/通用」样本建议候选定位 L3（宽松阈值 score>=1，仅作别名补录参考，不进生产）。"""
+    idx = index or load_standard_index()
+    cands = candidates_for(l1, l2, idx)
+    scored: List[tuple] = []
+    for c in cands:
+        if len(c) < 2:
+            continue
+        sc = _bigram_score(text or "", c)
+        if sc >= 1:
+            scored.append((c, sc))
+    scored.sort(key=lambda x: (-x[1], -len(x[0]), x[0]))
+    return scored[:top_n]
+
