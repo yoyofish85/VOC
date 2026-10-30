@@ -2750,6 +2750,9 @@ def _write_confirm_reviews(
                     raw_l1,
                     item.get("review_l2") or base.get("review_l2") or auto_l2 or "",
                 )
+                raw_l3 = (item.get("review_l3") or base.get("review_l3") or "").strip()
+                if l1 == NON_ISSUE_L1:
+                    raw_l3 = ""
                 note = item.get("review_note")
                 if note is None:
                     note = base.get("review_note")
@@ -2758,14 +2761,15 @@ def _write_confirm_reviews(
                 extracted = ",".join(kws)
                 existing_l1 = (base.get("review_l1") or "").strip()
                 existing_l2 = (base.get("review_l2") or "").strip()
+                existing_l3 = (base.get("review_l3") or "").strip()
                 existing_reflow = int(base.get("reflow_synced") or 0)
-                labels_changed = (l1 != existing_l1) or (l2 != existing_l2)
+                labels_changed = (l1 != existing_l1) or (l2 != existing_l2) or (raw_l3 != existing_l3)
                 reflow_synced_val = 0 if labels_changed else existing_reflow
                 cur.execute(
-                    """UPDATE opinion SET review_status=1, review_l1=?, review_l2=?, review_note=?,
-                    extracted_keywords=?, reviewer=?, reviewed_at=?, review_l3='', reflow_synced=?
+                    """UPDATE opinion SET review_status=1, review_l1=?, review_l2=?, review_l3=?, review_note=?,
+                    extracted_keywords=?, reviewer=?, reviewed_at=?, reflow_synced=?
                     WHERE opinion_id=?""",
-                    [l1, l2, note, extracted, reviewer or None, now, reflow_synced_val, oid],
+                    [l1, l2, raw_l3, note, extracted, reviewer or None, now, reflow_synced_val, oid],
                 )
                 confirmed += 1
                 if with_reflow and labels_changed:
@@ -2774,6 +2778,7 @@ def _write_confirm_reviews(
                             **base,
                             "review_l1": l1,
                             "review_l2": l2,
+                            "review_l3": raw_l3,
                             "review_note": note,
                             "extracted_keywords": extracted,
                             "reviewer": reviewer,
@@ -4200,6 +4205,21 @@ def _taxonomy_options_batch_sync(cleaned: List[str]) -> Dict[str, Any]:
 async def taxonomy_options_api(l1: str = "", l2: str = ""):
     """返回金标二级白名单与指定 L1+L2 下的三级聚类 canonical 列表。"""
     return await asyncio.to_thread(_taxonomy_options_sync, l1, l2)
+
+
+@app.get("/api/v3/l3_standard_options")
+@rate_limit("taxonomy", RATE_LIMIT_CONFIG["taxonomy"]["rate"], RATE_LIMIT_CONFIG["taxonomy"]["interval"])
+async def l3_standard_options_api(l1: str = "", l2: str = ""):
+    """返回定位 L3 标准层选项（gold_l3_standard_v1），供人工复核高频 L2 下拉。"""
+    try:
+        from l3_standard_resolver import candidates_for
+    except ImportError:
+        import pathlib as _p, sys as _s
+        _lp = str(_p.Path(__file__).resolve().parents[2] / "label_project")
+        if _lp not in _s.path:
+            _s.path.insert(0, _lp)
+        from l3_standard_resolver import candidates_for
+    return {"code": 200, "data": {"l3_list": candidates_for(l1, l2)}}
 
 
 @app.get("/get_l2_by_l1")

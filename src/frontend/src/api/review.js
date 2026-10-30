@@ -176,6 +176,10 @@ export const commitGoldFeedbackApi = (data) => request.post('/commit_gold_feedba
 /** 金标二级白名单与三级聚类候选 */
 export const getTaxonomyOptionsApi = (params) => request.get('/api/v3/taxonomy_options', { params });
 
+/** 定位 L3 标准层选项（人工复核高频 L2 下拉） */
+export const getL3StandardOptionsApi = (params) =>
+  request.get('/api/v3/l3_standard_options', { params });
+
 /** 按一级拉取二级白名单（复核表一级→二级联动，与 taxonomy_options 同源） */
 export const getL2ByL1Api = (params) =>
   request.get('/get_l2_by_l1', { params: params || {}, timeout: 45000 });

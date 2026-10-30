@@ -448,3 +448,32 @@ def test_review_list_skip_total_keeps_last_pages_fast(archive_client) -> None:
     assert second.get("code") == 200, second
     assert second.get("total") == -1
     assert len(second.get("data") or []) == 5
+
+def test_confirm_review_persists_review_l3(archive_client) -> None:
+    """确认复核应持久化 review_l3（人工三级采集，方案 C）。"""
+    client, main_mod, _, _ = archive_client
+    _seed_batch(main_mod, "BATCH_L3", 1)
+
+    r = client.post(
+        "/confirm_review",
+        json={
+            "reviews": [
+                {
+                    "opinion_id": "BATCH_L3_000",
+                    "review_l1": "产品质量类",
+                    "review_l2": "车机",
+                    "review_l3": "车机异常",
+                }
+            ],
+            "reviewer": "pytest",
+            "with_reflow": False,
+            "also_yearly": False,
+        },
+    )
+    assert r.status_code == 200 and r.json().get("code") == 200
+
+    row = main_mod.query_db(
+        "SELECT review_l3 FROM opinion WHERE opinion_id = ?", ["BATCH_L3_000"], fetch_all=False
+    )
+    assert (row or {}).get("review_l3") == "车机异常"
+

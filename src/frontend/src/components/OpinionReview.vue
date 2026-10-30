@@ -478,6 +478,12 @@
             </el-option>
           </el-select>
         </div>
+        <div class="drawer-field" v-if="drawerL3Enabled">
+          <label>三级标签{{ drawerL3List.length ? '' : '（该二级暂无标准三级）' }}</label>
+          <el-select v-model="drawerL3" filterable clearable placeholder="默认采纳模型三级，可修正" style="width: 100%">
+            <el-option v-for="opt in drawerL3List" :key="opt" :label="opt" :value="opt" />
+          </el-select>
+        </div>
         <div class="drawer-field">
           <label>三级 · 系统关键词（自动提取，不可编辑）</label>
           <el-alert type="info" :closable="false" show-icon class="mb8">以下为系统从原文提取的关键词，用于归档与回流，人工不可改。</el-alert>
@@ -516,6 +522,7 @@ import {
   getBatchClassifyStatusApi,
   taxonomyOptionsBatchApi,
   getTaxonomyOptionsApi,
+  getL3StandardOptionsApi,
   exportReviewsCsvApi,
   confirmReviewApi,
   confirmAndWriteCsvApi,
@@ -799,6 +806,14 @@ const drawerKwJoined = ref('')
 const l1Unlocked = ref(false)
 const drawerSaving = ref(false)
 const drawerL2FilterQ = ref('')
+const drawerL3 = ref('')
+const drawerL3List = ref([])
+const HIGH_FREQ_L2 = new Set([
+  '售后服务问题', '销售服务问题', '座舱问题', 'APP问题',
+  '钥匙问题', 'LFC问题', '车端充电问题', '异响问题', '故障告警', 'AD4问题',
+  '交付问题', '试驾体验不良',
+])
+const drawerL3Enabled = computed(() => HIGH_FREQ_L2.has((drawerL2.value || '').trim()))
 
 const l1Edited = computed(() => {
   const a = (drawerL1.value || '').trim()
@@ -1750,6 +1765,21 @@ const reloadDrawerL2List = async () => {
   }
 }
 
+const reloadDrawerL3List = async () => {
+  const l1 = (drawerL1.value || '').trim()
+  const l2 = (drawerL2.value || '').trim()
+  if (!l1 || !l2 || !HIGH_FREQ_L2.has(l2)) {
+    drawerL3List.value = []
+    return
+  }
+  try {
+    const res = await getL3StandardOptionsApi({ l1, l2 })
+    drawerL3List.value = res.code === 200 && Array.isArray(res.data?.l3_list) ? res.data.l3_list : []
+  } catch (_) {
+    drawerL3List.value = []
+  }
+}
+
 const saveDraftReviews = async () => {
   if (!reviewList.value.length) {
     ElMessage.warning('当前页无数据')
@@ -1841,11 +1871,13 @@ const openDrawer = async (row) => {
   drawerL1Orig.value = o?.l1 || row.model_class || ''
   drawerL1.value = (row.review_l1 || row.canonical_l1 || o?.l1 || row.model_class || '').trim()
   drawerL2.value = (row.review_l2 || o?.l2 || '').trim()
+  drawerL3.value = (row.review_l3 || o?.l3 || '').trim()
   drawerNote.value = row.review_note || ''
   l1Unlocked.value = false
   drawerVisible.value = true
   drawerL2FilterQ.value = ''
   await reloadDrawerL2List()
+  await reloadDrawerL3List()
   await refreshDrawerKeywords()
 }
 
@@ -1874,6 +1906,7 @@ const confirmDrawerReview = async () => {
           opinion_id: drawerRow.value.opinion_id,
           review_l1: drawerL1.value.trim(),
           review_l2: (drawerL2.value || '').trim(),
+          review_l3: (drawerL3.value || '').trim(),
           review_note: drawerNote.value
         }
       ],
