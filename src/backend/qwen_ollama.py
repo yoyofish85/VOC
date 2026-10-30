@@ -51,6 +51,9 @@ from classification_context_rules import (  # noqa: E402
 logger = logging.getLogger("voc.qwen_ollama")
 
 QWEN_MODEL = os.environ.get("VOC_QWEN_MODEL", "qwen2.5:14b-instruct-q4_K_M")
+# 按角色拆分：汇报生成 / 低置信仲裁可独立模型（默认回退分类模型）
+QWEN_MODEL_REPORT = os.environ.get("VOC_QWEN_MODEL_REPORT", QWEN_MODEL)
+QWEN_MODEL_ARBITER = os.environ.get("VOC_QWEN_MODEL_ARBITER", QWEN_MODEL)
 QWEN_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 QWEN_TEMPERATURE = float(os.environ.get("VOC_QWEN_TEMPERATURE", "0.1"))
 QWEN_TOP_P = float(os.environ.get("VOC_QWEN_TOP_P", "0.3"))
@@ -154,9 +157,9 @@ def _read_cache() -> None:
         _CACHE_LOADED = True
 
 
-def _cache_key(kind: str, text: str, extra: str = "") -> str:
+def _cache_key(kind: str, text: str, extra: str = "", model: str = QWEN_MODEL) -> str:
     h = hashlib.sha256()
-    h.update(QWEN_MODEL.encode("utf-8"))
+    h.update(model.encode("utf-8"))
     h.update(b"\0")
     h.update(kind.encode("utf-8"))
     h.update(b"\0")
@@ -2719,7 +2722,7 @@ def summarize_opinions(
     region: str,
     prev_period_stats: Optional[Dict[str, Any]] = None,
     prev_period_rows: Optional[List[Dict[str, Any]]] = None,
-    model: str = QWEN_MODEL,
+    model: str = QWEN_MODEL_REPORT,
     host: str = QWEN_HOST,
 ) -> Dict[str, Any]:
     rows = rows[:300]
@@ -2742,7 +2745,7 @@ def summarize_opinions(
     volume_stats = _build_volume_stats(rows, prev_period_stats)
     representative_quotes = _pick_representative_quotes(rows)
     prev_key = json.dumps(prev_period_stats or {}, ensure_ascii=False, sort_keys=True)[:240]
-    key = _cache_key("summary", json.dumps(compact, ensure_ascii=False), f"{period}|{region}|{prev_key}")
+    key = _cache_key("summary", json.dumps(compact, ensure_ascii=False), f"{period}|{region}|{prev_key}", model=model)
     cached = _cache_get(key)
     if cached:
         cached["cache_hit"] = True
