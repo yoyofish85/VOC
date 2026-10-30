@@ -31,8 +31,7 @@ DEFAULT_DB = ROOT / "src" / "backend" / "opinion_review.db"
 
 
 def _fetch_rows(db: Path, limit: int, since_days: int) -> List[Dict[str, Any]]:
-    uri = f"file:{db.resolve()}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA query_only=ON")
     sql = """
@@ -140,6 +139,8 @@ def main() -> int:
                 "urgency",
                 "repeat_signal",
                 "root_cause_hint",
+                "complaint_gist",
+                "urgency_score",
                 "human_ok",
             ],
         )
