@@ -2715,6 +2715,22 @@ def _compute_trends_from_l1(
     return trends
 
 
+_INSIGHT_KEYS = ("complaint_gist", "urgency_score", "intent", "severity", "repeat_signal", "expected_action")
+
+
+def _row_insight_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+    """从行抽取 S6 洞察字段（已写入 v3_label_meta 时）。"""
+    meta = row.get("v3_label_meta")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    if not isinstance(meta, dict):
+        return {}
+    return {k: meta.get(k) for k in _INSIGHT_KEYS if meta.get(k) not in (None, "")}
+
+
 def summarize_opinions(
     rows: List[Dict[str, Any]],
     *,
@@ -2742,6 +2758,29 @@ def summarize_opinions(
                 "text": str(r.get("original_text") or "")[:240],
             }
         )
+    complaint_c: Counter = Counter()
+    urgency_high = 0
+    escalate_n = 0
+    intent_c: Counter = Counter()
+    for r in rows:
+        f = _row_insight_fields(r)
+        g = str(f.get("complaint_gist") or "").strip()
+        if g:
+            complaint_c[g] += 1
+        us = f.get("urgency_score")
+        if isinstance(us, (int, float)) and us >= 3:
+            urgency_high += 1
+        if f.get("intent") == "投诉升级":
+            escalate_n += 1
+        if f.get("intent"):
+            intent_c[str(f["intent"])] += 1
+    insight_block = {
+        "top_complaints": complaint_c.most_common(10),
+        "urgency_high": urgency_high,
+        "escalation": escalate_n,
+        "intent_distribution": dict(intent_c.most_common()),
+    }
+
     volume_stats = _build_volume_stats(rows, prev_period_stats)
     representative_quotes = _pick_representative_quotes(rows)
     prev_key = json.dumps(prev_period_stats or {}, ensure_ascii=False, sort_keys=True)[:240]
@@ -2771,6 +2810,12 @@ def summarize_opinions(
 ## 完整样本（每条最多 240 字）
 {json.dumps(compact, ensure_ascii=False)[:8000]}
 
+## 抱怨要点与紧迫需求（洞察字段，若已采集）
+高频抱怨要点：{json.dumps(insight_block['top_complaints'], ensure_ascii=False)}
+高紧迫(评分≥3)条数：{insight_block['urgency_high']}
+投诉升级条数：{insight_block['escalation']}
+用户意图分布：{json.dumps(insight_block['intent_distribution'], ensure_ascii=False)}
+
 ## 要求
 从以下 4 个维度输出 JSON，每个维度不得为空：
 
@@ -2778,6 +2823,7 @@ def summarize_opinions(
 2. **趋势观察**：相比上期，哪些问题在上升/下降/新出现？幅度如何？
 3. **问题表象**：高频问题的具体表现是什么？（如"车端充电问题"主要表现为地锁故障、充电枪拔不出）
 4. **代表性原文**：对前面给出的每条 quote 填写 takeaway（总结反映了什么问题），再补充 1 条你从样本中发现的有价值的原文（复制输出）。
+5. **具体抱怨与迫切需求**：结合「抱怨要点」与「紧迫需求」，指出客户具体在抱怨什么、最迫切要什么，并对应到可执行的行动。
 
 JSON Schema：
 {{

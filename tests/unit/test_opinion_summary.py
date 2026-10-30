@@ -2,6 +2,7 @@
 """summarize_opinions 汇报文案生成单元测试。"""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -177,3 +178,26 @@ def test_classify_text_compacts_long_original_before_prompt(tmp_path):
     assert prompts
     assert prompts[0].count("超长描述") < long_text.count("超长描述")
     assert "中间超长内容已省略" in prompts[0]
+
+def test_row_insight_fields_parses_meta():
+    from qwen_ollama import _row_insight_fields
+    row = {"v3_label_meta": '{"complaint_gist":"充电慢","urgency_score":3,"intent":"报障"}'}
+    f = _row_insight_fields(row)
+    assert f["complaint_gist"] == "充电慢"
+    assert f["urgency_score"] == 3
+    assert f["intent"] == "报障"
+    assert _row_insight_fields({"v3_label_meta": "{}"}) == {}
+
+
+def test_summarize_injects_insight_fields(mock_rows):
+    from qwen_ollama import summarize_opinions
+    meta = json.loads(mock_rows[0]["v3_label_meta"])
+    meta.update({"complaint_gist": "车机黑屏更换等待久", "urgency_score": 4, "intent": "投诉升级"})
+    mock_rows[0]["v3_label_meta"] = json.dumps(meta, ensure_ascii=False)
+
+    with patch("qwen_ollama.ollama_generate") as mock_gen:
+        mock_gen.return_value = '{"summary":"测试","top_issues":[],"risks":[],"actions":[],"ppt_text":"测试"}'
+        summarize_opinions(mock_rows, period="week", region="all")
+    prompt = mock_gen.call_args.args[0]
+    assert "抱怨要点" in prompt
+    assert "车机黑屏更换等待久" in prompt
